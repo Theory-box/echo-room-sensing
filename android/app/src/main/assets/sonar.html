@@ -180,10 +180,11 @@ function stop() { running = false; Native.sonarStop(); $('go').textContent = 'St
 window.onSonarStopped = () => { running = false; $('go').textContent = 'Start sonar'; };
 $('go').onclick = () => running ? stop() : start();
 $('clear').onclick = () => { clearAcc(); yaw0 = null; };
-$('back').onclick = () => { stop(); location.href = 'native.html'; };
+$('back').onclick = () => { stop(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = $('mask').onchange = $('sens').onchange = () => clearAcc();
 $('ping').onchange = () => { if (running) { stop(); start(); } };
 drawFrame(null, 5);
+try { Native.setReversed(true); } catch (e) { }   // held bottom-edge forward: rotate the screen 180 degrees
 </script>
 </body>
 </html>

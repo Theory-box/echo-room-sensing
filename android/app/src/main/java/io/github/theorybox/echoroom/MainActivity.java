@@ -534,6 +534,13 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         @JavascriptInterface public void sonarStop() { stopSonar(); }
 
+        /** Sonar screen is used with the phone held bottom-edge forward: show the UI rotated 180 degrees. */
+        @JavascriptInterface public void setReversed(boolean reversed) {
+            runOnUiThread(() -> setRequestedOrientation(reversed
+                    ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    : android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));
+        }
+
         @JavascriptInterface public String sonarRead(int frames, int ch) { return getSonar(frames, ch); }
 
         @JavascriptInterface public String newSession() {

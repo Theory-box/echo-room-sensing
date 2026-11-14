@@ -417,7 +417,7 @@ $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText(t); $('copymsg').textContent = 'Copied. Paste it into the chat.'; }
   catch (e) { $('out').focus(); $('out').select(); try { document.execCommand('copy'); $('copymsg').textContent = 'Copied (fallback).'; } catch (e2) { $('copymsg').textContent = 'Copy blocked: long-press the text box, Select all, Copy.'; } }
 };
-addEventListener('load', onIntent);
+addEventListener('load', () => { try { Native.setReversed(false); } catch (e) { } onIntent(); });
 </script>
 </body>
 </html>
