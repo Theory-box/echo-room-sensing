@@ -23,6 +23,7 @@
 <div id="wrap">
   <div class="row"><button class="alt" id="back">◀ Back</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button></div>
   <canvas id="ppi" width="720" height="720"></canvas>
+  <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
   <div class="mut" style="text-align:center">distance graph: spikes are echoes (white dots = picked), dashed line = sensitivity</div>
   <div id="dist">–</div>
@@ -30,6 +31,7 @@
   <div id="bar"><div></div></div>
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
+    <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
     <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="quiet">Quiet</option></select></label>
   </div>
   <div class="row">
@@ -45,7 +47,8 @@
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const SR = 48000, PERIOD = 3200, C = 343;                 // 15 pings per second
+const SR = 48000, C = 343;
+let PERIOD = 3200;                                        // samples between clicks (set from the click-rate setting)
 // Ping options. "Strong" uses the band the phone speaker handles well (audible ticks); "Quiet" is near-ultrasonic
 // but the speaker is weak there, so far fewer echoes clear the noise.
 const PINGS = {
@@ -53,7 +56,7 @@ const PINGS = {
   quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9 },
 };
 let PING = PINGS.strong.sig;
-const AVG = 3;   // average this many consecutive pings (identical, every PERIOD samples) before matched filtering
+let AVG = 3;     // consecutive clicks averaged before matched filtering (fewer when clicking slowly)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function f32ToB64(f) {
   const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength); let s = '';
@@ -130,7 +133,7 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   for (let b = 0; b < nbin; b++) {
     let m = 0; for (let i = Math.floor(b * binS); i < Math.floor((b + 1) * binS); i++) m = Math.max(m, raw[i]);
     const r = Math.max(b * binM, 0.3), a = m / peak;
-    lev[b] = a > 3 * noise ? 20 * Math.log10(a * Math.min(r, 2)) : -120;
+    lev[b] = a > 3 * noise ? 20 * Math.log10(a * r) : -120;
   }
   let pk = [];
   for (let b = Math.max(b0, 1); b < nbin - 1; b++)
@@ -138,14 +141,14 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   pk.sort((x, y) => y.l - x.l);
   const best = pk.length ? pk[0].l : -120, kept = [];
   for (const q of pk) {
-    if (q.l < best - 18 || kept.length >= 4) break;
+    if (q.l < best - 24 || kept.length >= 5) break;
     if (kept.some(k => Math.abs(q.b - k.b) < 4)) continue;                       // same echo
     if (kept.some(k => [2, 3, 4, 5].some(n => Math.abs(q.r - n * k.r) < 0.08 + 0.02 * n))) continue;   // multiple
     kept.push(q);
   }
   const prof = new Float32Array(nbin);
   for (const q of kept) {
-    const v = Math.min(1, Math.max(0.25, (q.l - (best - 18)) / 18));
+    const v = Math.min(1, Math.max(0.25, (q.l - (best - 24)) / 24));
     for (let d = -1; d <= 1; d++) if (q.b + d >= 0 && q.b + d < nbin) prof[q.b + d] = Math.max(prof[q.b + d], d ? v * 0.5 : v);
   }
   const near = kept.length ? Math.min(...kept.map(q => q.r)) : null;
@@ -194,15 +197,19 @@ async function loop() {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       $('status').textContent = `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame`;
     }
-    await sleep(Math.max(10, 66 - (performance.now() - t0)));
+    await sleep(Math.max(10, PERIOD / SR * 1000 - (performance.now() - t0)));
   }
 }
 
 async function start() {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
   const P = PINGS[$('ping').value]; PING = P.sig;
-  const play = new Float32Array(PING.I.length);
-  for (let i = 0; i < play.length; i++) play[i] = P.amp * PING.I[i];
+  const rate = +$('rate').value;
+  PERIOD = Math.round(SR / rate);
+  AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
+  const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
+  const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
+  for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; return; }
   running = true; yaw0 = null; nearHist = []; clearAcc();
@@ -216,7 +223,9 @@ $('go').onclick = () => running ? stop() : start();
 $('clear').onclick = () => { clearAcc(); yaw0 = null; };
 $('back').onclick = () => { stop(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = $('mask').onchange = $('sens').onchange = () => clearAcc();
-$('ping').onchange = () => { if (running) { stop(); start(); } };
+$('ping').onchange = $('rate').onchange = () => { if (running) { stop(); start(); } };
+$('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
+$('vol').onchange = () => { if (running) { stop(); start(); } };
 drawFrame(null, 5);
 try { Native.setReversed(true); } catch (e) { }   // held bottom-edge forward: rotate the screen 180 degrees
 </script>
