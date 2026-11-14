@@ -64,3 +64,15 @@ Raw report: `results/2026-11-14_native-run1_flat-on-towel.json`
 - Rejected for now: handheld body sweep (body echo + hand motion). Upright stops not needed: with the phone
   flat, echoes with ~zero mic TDOA at every rotation are above/below (ceiling/floor).
 - Next: pull a sweep, compute per-echo direction from mic TDOA vs yaw, plot a top-down reflector map.
+
+## First room sweep (2026-11-14 13:41 local, 2 spots × 8 stops)
+Data: `results/sweep-20261114-134133/session.json` (+ map); raw WAVs on the user's PC in Documents/echo-room-data/.
+- Capture quality excellent: all stops within ~3° of target, gyro max during capture ≤0.016 rad/s, phone level,
+  align conf 2600–4700, noise ≈ -75 dBFS, US SNR ~80/45–60 dB. Turned counter-clockwise (azimuth decreasing).
+- Mic2−mic1 direct path: median 16.5 samples (≈11.8 cm), stable ±2 samples.
+- Analysis (`analysis/sweep_map.py`, `plot_map.py`): sweep deconvolution → analytic IRs, align on direct path,
+  subtract per-spot mean across stops (removes phone-fixed energy), back-project 2-mic envelope product on a
+  horizontal grid with each stop's yaw, r² spreading gain, per-range contrast.
+- Result v1: ranges are crisp (rings), but direction is weak; only partial arcs. Coherent (carrier-phase) cross
+  term gave aliasing fringes (14 cm spacing ≫ λ). Needs ground truth from the user to judge arcs.
+- Idea: range-only multi-spot trilateration (Dokmanić-style) may beat 2-mic TDOA; needs known spot positions.
