@@ -32,7 +32,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="quiet">Quiet</option></select></label>
+    <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
@@ -56,6 +56,7 @@ let PERIOD = 3200;                                        // samples between cli
 // but the speaker is weak there, so far fewer echoes clear the noise.
 const PINGS = {
   strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9 },
+  mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9 },   // louder than ultrasonic, narrower beam than strong
   quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9 },
 };
 let PING = PINGS.strong.sig;
