@@ -34,7 +34,7 @@
     <label>Sensitivity <select id="sens"><option value="-34">Low</option><option value="-38" selected>Medium</option><option value="-42">High</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
-  <p class="mut">Hold the phone <b>flat at chest height</b>, top pointing away from you, arm a little out. Turn slowly on the spot.
+  <p class="mut">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
     Echoes are painted in the direction the phone points; your body blocks most sound from behind.
     Direction is rough (tens of degrees); distance is precise. You'll hear faint ticks.</p>
   <div id="status" class="mut"></div>
@@ -148,7 +148,7 @@ async function loop() {
       const { raw, peak, noise } = profileFrom(x, +$('range').value);
       const o = JSON.parse(Native.orientation());
       if (yaw0 === null) yaw0 = o.yaw;
-      const theta = angDiff(o.yaw, yaw0);
+      const theta = angDiff(o.yaw, yaw0);   // relative to the direction faced at Start, so either phone edge works
       const { prof, near } = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
       const mR = +$('range').value, mk = +$('mask').value;
       paint(theta, prof, binM, mR, mk);
