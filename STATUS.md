@@ -165,3 +165,35 @@ Acted on the reviewing instance's suggestions (sections 7–8 above are partly s
 **Revised estimate:** rotate-in-place + rectangle fit in a sparse rectangular room: ~55–60% for correct room
 dimensions, ~45–50% for correct orientation too. **Next:** one 8-stop sweep in a sparse room with tape-measured
 distances to all 4 walls, plus the scratch test. Orbit sweep only if orientation fails.
+
+## 12. Second review: two speakers (confirmed as a real error)
+
+The reviewing instance found that the sweep plays from **both speakers**, while the fitter and simulator assumed
+one. Checked here:
+
+- **Simulator** now models the L channel as a second source at the top earpiece (`--earpiece <gain>`).
+  Same room as before (12 scatterers, jitter):
+
+  | L/earpiece gain | Orientation error, both-speaker sweep | Orientation error, R chirps only |
+  |---|---|---|
+  | 0 (one speaker) | 2° | 2° |
+  | 0.5 | 8° | 2° |
+  | 0.7 | 12° | 2° |
+  | 1.0 | 12°; bottom-mic-only fit permutes the walls | 2° |
+
+  Distances survive; **orientation** is what the second speaker damages.
+- **Fitter:** `--source R|L` builds IRs from that speaker's 1–18 kHz chirps only (2 per stop, averaged);
+  `--mics 1` = bottom mic only.
+- **Kitchen data, R chirps only:** spot 1 and spot 2 **independently give orientation 3°** (walls square to the
+  phone's starting direction). Flipped yaw: 8° vs 57° (disagree). Control: shuffled yaw-to-recording assignments
+  (5 shuffles × 2 spots) give 12, 66, 26, 32, 68, 19, 83, 29, 70, 89°: no bias toward 0/45°, never agreeing. Chance
+  of a ≤1° agreement ≈ 3%. So orientation appears recovered on real data for the first time, and the yaw sign is
+  probably right. Distances still disagree between spots (stove nook ≠ closed rectangle; the back wall at ~0.3 m is
+  inside the excluded near-field).
+- **App (built, not yet installed):** sweep + ultrasonic now play from R (bottom speaker) only; the L/R 1–18 kHz
+  chirps are unchanged. Session format `echo-room-sweep v3`.
+- Note: there was no "new room" dataset yet when the review was written; the sparse-room test hasn't been run.
+
+Still open from the review: back-mic first-arrival jumps (the median re-anchoring helps; raise the phone),
+pivot drift (sim assumes 1.5 cm; a pin-through-cardboard pivot would help), and checking ranges against the
+tape measure before orientation in the sparse-room test.

@@ -23,7 +23,8 @@ SR = 48000
 # Phone frame (m, origin = phone centre), same as analysis/sweep_map.py.
 CENTRE = np.array([0.036, 0.077])
 MICS = np.array([[0.0269, 0.0058], [0.0546, 0.1456]]) - CENTRE
-SPK = np.array([0.040, 0.000]) - CENTRE
+SPK = np.array([0.040, 0.000]) - CENTRE        # "R" channel: bottom speaker
+SPK_L = np.array([0.036, 0.152]) - CENTRE      # "L" channel: top earpiece (assumed position)
 
 
 def log_sweep(f1, f2, T):
@@ -52,15 +53,21 @@ def plan():
          "chirpA": {"f0": 1000, "f1": 18000, "T": 0.06, "L": [S(2.1), S(2.3)], "R": [S(2.5), S(2.7)]},
          "us": {"f0": 18000, "f1": 22000, "T": 0.04, "starts": [S(3.0) + k * S(0.21) for k in range(8)]},
          "preRollSamples": S(0.4), "channels": "ch1 = bottom mic, ch2 = back mic (simulated)"}
-    play = np.zeros(P["total"])
-    sw = log_sweep(50, 23500, 1.5); play[P["sweep"]["start"]:][:len(sw)] += 2 * P["A"] * sw  # both speakers
+    # Separate L and R channel feeds (the app plays sweep and ultrasonic on both, chirps on one at a time).
+    pl, pr = np.zeros(P["total"]), np.zeros(P["total"])
+    sw = log_sweep(50, 23500, 1.5)
+    for p in (pl, pr):
+        p[P["sweep"]["start"]:][:len(sw)] += P["A"] * sw
     ch = lin_chirp(1000, 18000, 0.06, "tukey")
-    for s in P["chirpA"]["L"] + P["chirpA"]["R"]:
-        play[s:s + len(ch)] += P["A"] * ch
+    for s in P["chirpA"]["L"]:
+        pl[s:s + len(ch)] += P["A"] * ch
+    for s in P["chirpA"]["R"]:
+        pr[s:s + len(ch)] += P["A"] * ch
     us = lin_chirp(18000, 22000, 0.04, "hann")
     for s in P["us"]["starts"]:
-        play[s:s + len(us)] += 2 * P["A"] * us
-    return P, play
+        for p in (pl, pr):
+            p[s:s + len(us)] += P["A"] * us
+    return P, pl, pr
 
 
 def rot(alpha_deg):
@@ -107,6 +114,8 @@ def main():
     ap.add_argument("--yaw-jitter", type=float, default=2.0)
     ap.add_argument("--pos-jitter", type=float, default=0.01)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--earpiece", type=float, default=0.0,
+                    help="gain of the second (L-channel, top earpiece) speaker relative to the bottom one; 0 = single speaker")
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     W, Lr, H = map(float, a.room.split(","))
@@ -130,7 +139,7 @@ def main():
         q = np.array([rng.uniform(0.2, W - 0.2), rng.uniform(0.2, Lr - 0.2)])
         if np.hypot(q[0] - px, q[1] - py) > 0.4:
             clutter.append((to_sess(q), rng.uniform(0.02, 0.08)))
-    P, play = plan()
+    P, play_l, play_r = plan()
     spots = [np.array(list(map(float, s.split(",")))) for s in a.spots.split(";")]
     os.makedirs(a.out, exist_ok=True)
     b_lp, a_lp = signal.butter(1, 4000 / (SR / 2))   # back mic: weak above a few kHz (as measured)
@@ -140,22 +149,26 @@ def main():
             yaw = a.turn * k * 360 / a.stops + rng.normal(0, a.yaw_jitter) + 0.0
             centre = off + rng.normal(0, a.pos_jitter, 2)
             Rk = rot(yaw)
-            S = centre + Rk @ SPK
             rec = []
             for mi in range(2):
                 M = centre + Rk @ MICS[mi]
-                ir = np.zeros(int(0.08 * SR))
-                d0 = np.linalg.norm(M - S)
-                add_tap(ir, d0 / C, 1.0 / max(d0, 0.05))
-                for dp, amp in ((0.06, 3.0), (0.11, 2.0), (0.16, 1.2)):        # phone body / stand, phone-fixed
-                    add_tap(ir, (d0 + dp) / C, amp)
-                for q, o in image_sources(S, walls, a.order):
-                    L = np.linalg.norm(M - q); add_tap(ir, L / C, a.beta ** o / L)
-                for zimg in (2 * pz, 2 * (H - pz)):                               # floor / ceiling (first order)
-                    L = np.hypot(np.linalg.norm(M - S), zimg); add_tap(ir, L / C, a.beta / L)
-                for q, amp in clutter:
-                    L = np.linalg.norm(q - S) + np.linalg.norm(q - M); add_tap(ir, L / C, amp / (np.linalg.norm(q - S) * np.linalg.norm(q - M)))
-                y = signal.fftconvolve(play, ir)[: P["total"]] * 0.02
+                y = np.zeros(P["total"])
+                for spk, play, gain in ((SPK, play_r, 1.0), (SPK_L, play_l, a.earpiece)):
+                    if gain <= 0:
+                        continue
+                    S = centre + Rk @ spk
+                    ir = np.zeros(int(0.08 * SR))
+                    d0 = np.linalg.norm(M - S)
+                    add_tap(ir, d0 / C, 1.0 / max(d0, 0.05))
+                    for dp, amp in ((0.06, 3.0), (0.11, 2.0), (0.16, 1.2)):        # phone body / stand, phone-fixed
+                        add_tap(ir, (d0 + dp) / C, amp)
+                    for q, o in image_sources(S, walls, a.order):
+                        L = np.linalg.norm(M - q); add_tap(ir, L / C, a.beta ** o / L)
+                    for zimg in (2 * pz, 2 * (H - pz)):                               # floor / ceiling (first order)
+                        L = np.hypot(np.linalg.norm(M - S), zimg); add_tap(ir, L / C, a.beta / L)
+                    for q, amp in clutter:
+                        L = np.linalg.norm(q - S) + np.linalg.norm(q - M); add_tap(ir, L / C, amp / (np.linalg.norm(q - S) * np.linalg.norm(q - M)))
+                    y += gain * signal.fftconvolve(play, ir)[: P["total"]] * 0.02
                 if mi == 1:
                     y = signal.lfilter(b_lp, a_lp, y)
                 full = np.zeros(P["preRollSamples"] + latency + P["total"] + int(0.8 * SR))

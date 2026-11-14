@@ -21,6 +21,39 @@ from scipy.io import wavfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 from sweep_map import C, M as MICS, S as SPK, UP, impulse_responses, log_sweep  # noqa: E402
+from simulate import lin_chirp  # noqa: E402
+from scipy import signal  # noqa: E402
+
+
+def chirp_irs(x, sweep, sr, plan, which, band=(1000.0, 16000.0), ir_len=0.03):
+    """IRs from one speaker's chirps only (plan.chirpA[which], 'L' or 'R'), averaged over its chirps.
+    Located via the sweep (both speakers), so the timeline matches impulse_responses()."""
+    mix = x.sum(axis=1)
+    c = signal.fftconvolve(mix[: int(2.5 * sr)], sweep[::-1], mode="valid")
+    base = int(np.argmax(np.abs(c))) - plan["sweep"]["start"]          # recording index of playback sample 0
+    ca = plan["chirpA"]
+    ch = lin_chirp(ca["f0"], ca["f1"], ca["T"], "tukey")
+    pre, win = int(0.002 * sr), int(0.15 * sr)
+    N = 1 << int(np.ceil(np.log2(win + len(ch))))
+    X = np.fft.rfft(ch, N)
+    f = np.fft.rfftfreq(N, 1 / sr)
+    bw = np.zeros_like(f)
+    inb = (f >= band[0]) & (f <= band[1])
+    bw[inb] = signal.windows.tukey(inb.sum(), 0.2)
+    reg = 1e-3 * np.max(np.abs(X)) ** 2
+    L = int(ir_len * sr) + int(0.004 * sr)
+    out, direct = [], []
+    for chn in range(x.shape[1]):
+        acc = np.zeros(L)
+        for s in ca[which]:
+            seg = x[base + s - pre: base + s - pre + win, chn]
+            acc += np.fft.irfft(np.fft.rfft(seg, N) * np.conj(X) / (np.abs(X) ** 2 + reg) * bw, N)[:L]
+        a = signal.hilbert(signal.resample_poly(acc / len(ca[which]), UP, 1))
+        out.append(a)
+    out = np.array(out)
+    for chn in range(out.shape[0]):
+        direct.append(float(np.argmax(np.abs(out[chn, : int(0.006 * sr * UP)]))))
+    return out, np.array(direct)
 
 
 def rot(alpha_deg):
@@ -28,7 +61,7 @@ def rot(alpha_deg):
     return np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
 
 
-def load(sess, spots=None):
+def load(sess, spots=None, source="sweep"):
     man = json.load(open(os.path.join(sess, "session.json"), encoding="utf-8"))
     sr = man["plan"]["sr"]
     sw = man["plan"]["sweep"]
@@ -37,7 +70,10 @@ def load(sess, spots=None):
     out = []
     for c in caps:
         _, x = wavfile.read(os.path.join(sess, c["file"].split("/")[-1]))
-        irs, direct = impulse_responses(x.astype(np.float64), sweep, sr, ir_len=0.03)
+        if source == "sweep":
+            irs, direct = impulse_responses(x.astype(np.float64), sweep, sr, ir_len=0.03)
+        else:
+            irs, direct = chirp_irs(x.astype(np.float64), sweep, sr, man["plan"], source)
         out.append([c, irs, direct])
     med = float(np.median([d[1] - d[0] for _, _, d in out]))
     for _, irs, direct in out:
@@ -73,7 +109,7 @@ def envelopes(irs, direct, sr):
     return env
 
 
-def score(data, sr, offsets, phis, rhos, flip=False, mirror=False):
+def score(data, sr, offsets, phis, rhos, flip=False, mirror=False, mics_used=(0, 1)):
     fs = sr * UP
     P, R = np.meshgrid(np.deg2rad(phis), rhos, indexing="ij")
     N = np.stack([np.sin(P), np.cos(P)], -1)                 # wall normal, bearing clockwise from +y
@@ -87,7 +123,7 @@ def score(data, sr, offsets, phis, rhos, flip=False, mirror=False):
         env = envelopes(irs, direct, sr)
         Sd = R - (N @ S)                                     # signed distance speaker -> wall
         Sp = S + 2 * Sd[..., None] * N                       # mirrored speaker
-        for i in range(2):
+        for i in mics_used:
             Mw = centre + Rk @ mics[i]
             L = np.linalg.norm(Sp - Mw, axis=-1)
             d0 = np.linalg.norm(Mw - S)
@@ -144,11 +180,11 @@ def free_peaks(Hc, phis, rhos, n=6):
              "rel": round(float(sm[ii[k], jj[k]] / top), 2)} for k in o]
 
 
-def run(sess, prefix, offsets, flip=False, mirror=False, spots=None, rmax=5.0, plot=True):
-    man, sr, data, med = load(sess, spots)
+def run(sess, prefix, offsets, flip=False, mirror=False, spots=None, rmax=5.0, plot=True, source="sweep", mics_used=(0, 1)):
+    man, sr, data, med = load(sess, spots, source)
     phis = np.arange(0, 360, 1.0)
     rhos = np.arange(0.3, rmax, 0.005)
-    H = score(data, sr, offsets, phis, rhos, flip, mirror)
+    H = score(data, sr, offsets, phis, rhos, flip, mirror, mics_used)
     iso = np.median(H, axis=0)
     Hc = ndimage.gaussian_filter1d(H - iso[None, :], 1.5, axis=1)
     (s, p0, dists, strengths), allp = manhattan(Hc, phis, rhos)
@@ -205,10 +241,13 @@ def main():
     ap.add_argument("--offsets", default="0,0")
     ap.add_argument("--flip-yaw", action="store_true"); ap.add_argument("--mirror-x", action="store_true")
     ap.add_argument("--spots", default=None); ap.add_argument("--rmax", type=float, default=5.0)
+    ap.add_argument("--source", default="sweep", choices=["sweep", "R", "L"], help="sweep = both speakers; R/L = that speaker's chirps only")
+    ap.add_argument("--mics", default="1,2", help="1 = bottom mic, 2 = back mic")
     a = ap.parse_args()
     offs = {i + 1: tuple(map(float, s.split(","))) for i, s in enumerate(a.offsets.split(";"))}
     spots = [int(s) for s in a.spots.split(",")] if a.spots else None
-    r = run(a.sess, a.prefix, offs, a.flip_yaw, a.mirror_x, spots, a.rmax)
+    r = run(a.sess, a.prefix, offs, a.flip_yaw, a.mirror_x, spots, a.rmax, source=a.source,
+            mics_used=tuple(int(m) - 1 for m in a.mics.split(",")))
     m = r["manhattan"]
     print(json.dumps({"score": m["score"], "phi0": m["phi0_deg"], "walls": [(w["bearing_deg"], w["dist_m"]) for w in m["walls"]],
                       "room": m["room_size_m"], "sharp_sd": m["orientation_sharpness_sd"],

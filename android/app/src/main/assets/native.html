@@ -256,14 +256,28 @@ async function captureOnce(b64, P, saveRel) {
 let waitCont = null;
 $('cont').onclick = () => { $('cont').style.display = 'none'; if (waitCont) { const f = waitCont; waitCont = null; f(); } };
 
+// Sweep playback for mapping: the log sweep and ultrasonic chirps go to the R channel (bottom speaker) only.
+// Playing them on both speakers mixed two sources ~14 cm apart (the L channel is the top earpiece), which
+// blurred direction in simulation (8–12° orientation error) and on the real kitchen data.
+// The per-speaker 1–18 kHz chirps stay on their own channels, for modelling the second speaker later.
+function buildSweepPlayback(P) {
+  const L = new Float32Array(P.total), R = new Float32Array(P.total);
+  const put = (dst, sig, at) => { for (let i = 0; i < sig.length && at + i < dst.length; i++) dst[at + i] += P.A * sig[i]; };
+  put(R, P.sweepSig, P.sweep.start);
+  P.chirpA.L.forEach(s => put(L, P.chirpSig.I, s));
+  P.chirpA.R.forEach(s => put(R, P.chirpSig.I, s));
+  P.us.starts.forEach(s => put(R, P.usSig.I, s));
+  return { L, R };
+}
+
 async function runSweep(o) {
   if (busy) return; busy = true; $('sweep').disabled = true; $('run').disabled = true;
-  const P = makeSweepPlan(48000), pb = buildPlayback(P);
+  const P = makeSweepPlan(48000), pb = buildSweepPlayback(P);
   const inter = new Float32Array(P.total * 2);
   for (let i = 0; i < P.total; i++) { inter[2 * i] = pb.L[i]; inter[2 * i + 1] = pb.R[i]; }
   const b64 = f32ToB64(inter);
   const session = Native.newSession();
-  const man = { version: 'echo-room-sweep v2', session, time: new Date().toISOString(), device: JSON.parse(Native.info()),
+  const man = { version: 'echo-room-sweep v3', playback: 'sweep + ultrasonic on R (bottom speaker) only; 1-18 kHz chirps on L and R separately', session, time: new Date().toISOString(), device: JSON.parse(Native.info()),
     options: o, plan: { sr: P.sr, A: P.A, total: P.total, sweep: P.sweep, chirpA: { f0: 1000, f1: 18000, T: 0.06, L: P.chirpA.L, R: P.chirpA.R },
       us: { f0: 18000, f1: 22000, T: 0.04, starts: P.us.starts }, preRollSamples: Math.round(0.4 * P.sr), channels: 'ch1 = bottom mic, ch2 = back mic (UNPROCESSED)' },
     yawConvention: 'yawSessionDeg: signed, unwrapped azimuth change since the session started (one frame for all spots; + = clockwise seen from above, screen up). yawRawDeg: sensor azimuth (game rotation vector). yawStartDeg/turnDir: legacy, per-spot magnitude and sign.',
