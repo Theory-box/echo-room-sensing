@@ -78,19 +78,24 @@ const W = cv.width, CX = W / 2, CY = W / 2, RPX = W / 2 - 22;
 function clearAcc() { actx.fillStyle = '#000'; actx.fillRect(0, 0, W, W); }
 clearAcc();
 
+// Heading-up display: the sweep line always points straight up (where the phone points now), and the
+// painted map is drawn rotated by -heading, so it stays fixed to the room while you turn.
 function drawFrame(theta, maxR) {
+  const rot = (theta || 0) * Math.PI / 180;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W);
+  ctx.save(); ctx.translate(CX, CY); ctx.rotate(-rot); ctx.translate(-CX, -CY);
   ctx.drawImage(acc, 0, 0);
+  ctx.strokeStyle = 'rgba(255,200,80,0.7)'; ctx.lineWidth = 2;               // where you faced at Start
+  ctx.beginPath(); ctx.moveTo(CX, CY - RPX - 14); ctx.lineTo(CX, CY - RPX + 4); ctx.stroke(); ctx.lineWidth = 1;
+  ctx.restore();
   ctx.strokeStyle = 'rgba(80,200,120,0.35)'; ctx.fillStyle = 'rgba(120,220,150,0.7)'; ctx.lineWidth = 1; ctx.font = '18px system-ui';
   for (let m = 1; m <= maxR; m++) {
     ctx.beginPath(); ctx.arc(CX, CY, RPX * m / maxR, 0, 2 * Math.PI); ctx.stroke();
     ctx.fillText(m + ' m', CX + 4, CY - RPX * m / maxR + 18);
   }
-  ctx.beginPath(); ctx.moveTo(CX, CY - RPX - 12); ctx.lineTo(CX, CY - RPX); ctx.stroke();
-  ctx.fillText('start', CX + 6, CY - RPX - 2);
-  if (theta != null) {   // sweep line
-    const a = (theta - 90) * Math.PI / 180;
+  if (theta != null) {   // sweep line: always straight ahead
     ctx.strokeStyle = 'rgba(120,255,160,0.9)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX + RPX * Math.cos(a), CY + RPX * Math.sin(a)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX, CY - RPX); ctx.stroke(); ctx.lineWidth = 1;
   }
   ctx.fillStyle = '#3ddc84'; ctx.beginPath(); ctx.arc(CX, CY, 6, 0, 2 * Math.PI); ctx.fill();
 }
