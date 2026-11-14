@@ -43,13 +43,13 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option><option value="quietlong">Quiet (long)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option><option value="quietlong" selected>Quiet (long) – inaudible</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
   </div>
   <div class="row">
-    <label>Sensitivity <select id="sens"><option value="-34">Low</option><option value="-38" selected>Medium</option><option value="-42">High</option></select></label>
+    <label>Sensitivity <select id="sens"><option value="auto" selected>Auto</option><option value="-34">Low</option><option value="-38">Medium</option><option value="-42">High</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
   <p class="mut" id="howfwd">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
@@ -179,9 +179,13 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   }
   // Quiet modes: echoes sit lower relative to the direct sound (high pitch), so a threshold tuned for Strong hides
   // them. There, set the threshold a few dB above this click's typical echo level instead (Low/Med/High: +9/+7/+5 dB).
-  if (/^quiet/.test($('ping').value)) {
+  // "Auto" (any ping): threshold = this click's typical echo level + 7 dB. Fixed Low/Med/High keep the Strong-tuned
+  // levels, except for Quiet modes, where they are applied relative to the typical level (+9/+7/+5 dB).
+  const auto = thr === 'auto';
+  if (auto || /^quiet/.test($('ping').value)) {
     const valid = Array.from(lev.subarray(b0)).filter(v => v > -100).sort((a, c) => a - c);
-    if (valid.length > 8) thr = Math.min(thr, valid[valid.length >> 1] + (thr >= -34 ? 9 : thr >= -38 ? 7 : 5));
+    const typ = valid.length > 8 ? valid[valid.length >> 1] : -60;
+    thr = auto ? typ + 7 : Math.min(thr, typ + (thr >= -34 ? 9 : thr >= -38 ? 7 : 5));
   }
   lastThr = thr;
   let pk = [];
@@ -286,7 +290,7 @@ function frame(binM, binS, t0) {
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
       const theta = angDiff(yawUse, yaw0);   // relative to the direction faced at Start, so either phone edge works
-      const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
+      const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, $('sens').value === 'auto' ? 'auto' : +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
       const directLag = micLag(env, env2, d, 10, 26);   // full window around the click (not one-sided)
@@ -372,8 +376,8 @@ function placeButtons() {
 matchMedia('(orientation: landscape)').addEventListener('change', placeButtons);
 // Remember settings between visits (per-device convenience; falls back silently if storage is unavailable).
 const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol'];
-try { const st = JSON.parse(localStorage.getItem('sonarSettings') || '{}'); for (const k of SAVED) if (st[k] !== undefined) $(k).value = st[k]; $('volv').textContent = $('vol').value + '%'; } catch (e) { }
-function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings', JSON.stringify(st)); } catch (e) { } }
+try { const st = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); for (const k of SAVED) if (st[k] !== undefined) $(k).value = st[k]; $('volv').textContent = $('vol').value + '%'; } catch (e) { }
+function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings2', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
 
 placeButtons();
