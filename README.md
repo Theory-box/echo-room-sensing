@@ -6,6 +6,8 @@ turned into a polygon mesh) plus rough boxes for furniture, from a few static ca
 
 **This is a test project, not a product or a download.**
 
+See **[STATUS.md](STATUS.md)** for the current findings and options.
+
 ## Stages
 1. **Echo diagnostic** (`diagnostic/`): checks whether the phone's speakers, mics and
    motion sensors are good enough. Everything runs in the browser; nothing is uploaded.
