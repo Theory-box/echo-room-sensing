@@ -26,14 +26,23 @@
 <h1>Echo Room</h1>
 <div class="card">
   <b>Room sweep</b>
-  <ol>
+  <label>Turning with<select id="rig"><option value="lazy" selected>Lazy Susan (recommended)</option><option value="hand">Hand</option></select></label>
+  <ol id="howLazy">
+    <li><b>Tape the phone flat, screen up,</b> on the lazy Susan. Either spot works, no measuring:
+      <b>near the edge</b> (best), or <b>centred</b> using the cross from "Show centre cross". Keep both phone ends uncovered.</li>
+    <li>Put the lazy Susan somewhere open, ideally on a table near the middle of the room.</li>
+    <li>Tap <b>Start sweep</b>. When it says <b>"Turn slowly"</b>, turn the lazy Susan (always the same way) until it says <b>"Stop"</b>.</li>
+    <li>Then duck down and stay quiet until the next "Turn slowly".</li>
+  </ol>
+  <ol id="howHand" style="display:none">
     <li>Phone <b>flat, screen up</b>, raised a little (e.g. on a small container) so both ends hang free.</li>
     <li>Tap <b>Start sweep</b>. After each recording the phone says <b>"Turn slowly"</b>: rotate it in place (don't slide it) until it says <b>"Stop"</b>.</li>
     <li>Then duck down out of the way and stay quiet until the next "Turn slowly".</li>
-    <li>With 2 spots: when asked, move the phone about a foot to the side and tap <b>Continue</b>.</li>
+    <li>With 2 spots: when asked, slide the phone about a foot to the side and tap <b>Continue</b>.</li>
   </ol>
-  <label>Stops per spot<select id="stops"><option value="8" selected>8 (every 45°)</option><option value="12">12 (every 30°)</option></select></label>
-  <label>Spots<select id="spots"><option value="1">1</option><option value="2" selected>2</option></select></label>
+  <button id="cross" style="background:#555">Show centre cross</button>
+  <label>Stops per spot<select id="stops"><option value="8">8 (every 45°)</option><option value="12" selected>12 (every 30°)</option></select></label>
+  <label>Spots<select id="spots"><option value="1" selected>1</option><option value="2">2</option></select></label>
   <label>Time to duck before each recording<select id="duck"><option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option></select></label>
   <label>Start delay<select id="sdelay"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="30">30 s</option></select></label>
   <button id="sweep">Start sweep</button>
@@ -42,6 +51,15 @@
 </div>
 <div id="status" class="mut"></div>
 <div class="bar"><div id="prog"></div></div>
+
+<!-- Full-screen centre cross: marks the phone centre the analysis assumes (screen centre). Tap to close. -->
+<div id="crossview" style="display:none;position:fixed;inset:0;background:#000;z-index:10">
+  <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:#4fc3f7"></div>
+  <div style="position:absolute;top:50%;left:0;right:0;height:2px;margin-top:-1px;background:#4fc3f7"></div>
+  <div style="position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;border:2px solid #4fc3f7;border-radius:50%"></div>
+  <div style="position:absolute;left:0;right:0;bottom:12%;text-align:center;color:#ccc;font-size:15px;padding:0 20px">
+    Put the circle over the lazy Susan's centre (spin it gently: the centre is the point that doesn't move).<br>Tap anywhere to close.</div>
+</div>
 
 <details class="card">
   <summary><b>Mic test</b> (all recording modes, about 1 min)</summary>
@@ -217,7 +235,7 @@ function stopYawTracking() { clearInterval(yawTimer); yawTimer = null; }
 // Guide the user to `target` (deg, relative to `base` = session yaw at this spot's first stop).
 // dir: +1/-1, or 0 = learn from the first turn.
 async function guideTo(target, dir, base) {
-  await say('Turn slowly');
+  await say($('rig') && $('rig').value === 'lazy' ? 'Turn the lazy Susan slowly' : 'Turn slowly');
   let still = 0, saidStop = false, lastHint = 0;
   for (;;) {
     const now = Date.now(), o = ori(), rel = yawUnwrapped - base;
@@ -376,7 +394,16 @@ async function runScratch() {
 }
 $('scratch').onclick = runScratch;
 
-$('sweep').onclick = () => runSweep({ stops: +$('stops').value, spots: +$('spots').value, duck: +$('duck').value, delay: +$('sdelay').value });
+$('sweep').onclick = () => runSweep({ stops: +$('stops').value, spots: +$('spots').value, duck: +$('duck').value, delay: +$('sdelay').value,
+  rig: $('rig').value === 'lazy' ? 'lazySusan (pivot offset unknown; solved in analysis)' : 'hand' });
+$('rig').onchange = () => {
+  const lazy = $('rig').value === 'lazy';
+  $('howLazy').style.display = lazy ? '' : 'none'; $('howHand').style.display = lazy ? 'none' : '';
+  $('cross').style.display = lazy ? '' : 'none';
+  $('spots').value = lazy ? '1' : '2'; $('stops').value = lazy ? '12' : '8';
+};
+$('cross').onclick = () => { $('crossview').style.display = ''; };
+$('crossview').onclick = () => { $('crossview').style.display = 'none'; };
 
 function onIntent() {
   const ex = JSON.parse(Native.extras());

@@ -233,3 +233,15 @@ tape measure before orientation in the sparse-room test.
 - **Next capture must use a fixed pivot** (e.g. a pin/thumbtack through cardboard under the phone's centre, or the phone
   taped to a plate that turns on a pin) **and the bottom-speaker-only sweep** (app v3, built, not yet installed). Then
   check the ranges against the tape measure first, orientation second.
+
+## 14. Lazy Susan support (in progress, stopped by user)
+- Simulator `--pivot ox,oy`: phone centre offset from a turntable axis. Fitter `--pivot ox,oy|auto`: automatic pivot search
+  (peakiness shortlist, then the rectangle score with local refinement); no measuring needed.
+- With the true pivot, all simulated lazy-Susan setups (centred, 18 cm off-centre, diagonal) fit exactly (20°, walls exact).
+  First auto-search (peakiness only) was biased 1.5–4.5 cm; switched to the rectangle score: case "18 cm off-centre"
+  then found the pivot within 1 cm, orientation within 4°. Full validation (`analysis/lazy_susan_check.py`) was stopped
+  before finishing.
+- App (built, not installed): "Turning with: Lazy Susan" mode (default; 1 spot, 12 stops), full-screen centre cross,
+  lazy-Susan voice prompt. No inputs to fill in.
+- Realistic ceiling of this approach: a plain rectangle (dimensions within a few cm, orientation within a few degrees),
+  ~55–65% odds in the living room after another round or two of fixes; furniture unlikely.

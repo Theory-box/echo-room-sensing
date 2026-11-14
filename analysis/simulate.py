@@ -117,6 +117,8 @@ def main():
     ap.add_argument("--earpiece", default="0",
                     help="gain of the second (L-channel, top earpiece) speaker relative to the bottom one, per mic: "
                          "'g' or 'g_bottom,g_back'. Measured on the living-room sweep: 0.32,0.63 (echo energy 0.10x, 0.40x). 0 = single speaker")
+    ap.add_argument("--pivot", default="0,0",
+                    help="lazy Susan: phone-centre offset from the turntable axis, in the phone frame (m), e.g. 0,0.18")
     ap.add_argument("--chassis", action="store_true",
                     help="add through-the-body arrivals: L->bottom mic at -19 dB re R direct, R->back mic at -6 dB re its air path, both ~0.03 ms")
     a = ap.parse_args()
@@ -150,8 +152,9 @@ def main():
     for si, off in enumerate(spots, 1):
         for k in range(a.stops):
             yaw = a.turn * k * 360 / a.stops + rng.normal(0, a.yaw_jitter) + 0.0
-            centre = off + rng.normal(0, a.pos_jitter, 2)
             Rk = rot(yaw)
+            pv = np.array(list(map(float, a.pivot.split(","))))
+            centre = off + Rk @ pv + rng.normal(0, a.pos_jitter, 2)
             rec = []
             for mi in range(2):
                 M = centre + Rk @ MICS[mi]
@@ -189,7 +192,7 @@ def main():
             wavfile.write(os.path.join(a.out, name), SR, x)
             caps.append({"spot": si, "stop": k + 1, "targetDeg": round(k * 360 / a.stops), "yawSessionDeg": round(yaw, 2),
                          "yawStartDeg": round(abs(yaw), 2), "turnDir": a.turn if k else 0, "file": "sim/" + name,
-                         "spotOffsetTrue": [round(float(v), 3) for v in off]})
+                         "spotOffsetTrue": [round(float(v), 3) for v in off], "pivotTrue": a.pivot})
     man = {"version": "echo-room-sweep v2 (simulated)", "plan": {k: v for k, v in P.items()}, "captures": caps,
            "truth": {"room": [W, Lr, H], "phone": [px, py, pz], "roomRotDeg": a.room_rot, "walls": truth,
                      "ceiling_above_m": H - pz, "floor_below_m": pz, "clutter": len(clutter)},

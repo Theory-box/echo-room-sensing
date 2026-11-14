@@ -126,12 +126,13 @@ def envelopes(irs, direct, sr):
     return env
 
 
-def score(data, sr, offsets, phis, rhos, flip=False, mirror=False, mics_used=(0, 1)):
+def score(data, sr, offsets, phis, rhos, flip=False, mirror=False, mics_used=(0, 1), pivot=(0.0, 0.0)):
     fs = sr * UP
     P, R = np.meshgrid(np.deg2rad(phis), rhos, indexing="ij")
     N = np.stack([np.sin(P), np.cos(P)], -1)                 # wall normal, bearing clockwise from +y
-    mics = MICS * ([-1, 1] if mirror else [1, 1])
-    spk = SPK * ([-1, 1] if mirror else [1, 1])
+    # pivot: phone-centre offset from the rotation axis, in the phone frame (lazy Susan orbit).
+    mics = MICS * ([-1, 1] if mirror else [1, 1]) + np.asarray(pivot)
+    spk = SPK * ([-1, 1] if mirror else [1, 1]) + np.asarray(pivot)
     H = np.zeros(P.shape)
     for c, irs, direct, yaw in data:
         Rk = rot(-yaw if flip else yaw)
@@ -148,6 +149,47 @@ def score(data, sr, offsets, phis, rhos, flip=False, mirror=False, mics_used=(0,
             v = ndimage.map_coordinates(env[i], [idx.ravel()], order=1, mode="constant").reshape(idx.shape)
             H += v * L
     return H
+
+
+def contrast(H):
+    iso = np.median(H, axis=0)
+    return ndimage.gaussian_filter1d(H - iso[None, :], 1.5, axis=1)
+
+
+def find_pivot(data, sr, offsets, mics_used, rmax_pivot=0.30):
+    """Search the phone-centre offset from the rotation axis (no measuring needed).
+    Stage 1: cheap peakiness ranking on a coarse polar grid. Stage 2: the full rectangle (walls + corners) score
+    on the best candidates, then local refinement with that score. (Peakiness alone was biased ~2-4 cm in sim;
+    the rectangle score peaks at the true pivot.)"""
+    phis = np.arange(0, 360, 2.0)
+    rhos = np.arange(0.3, 5.0, 0.01)
+
+    def Hc_of(pv):
+        return contrast(score(data, sr, offsets, phis, rhos, mics_used=mics_used, pivot=pv))
+
+    def peaky(pv):
+        v = np.sort(Hc_of(pv).ravel())
+        return float(v[-max(1, v.size // 500):].mean())
+
+    def rect(pv):
+        Hc = Hc_of(pv)
+        # manhattan() indexes rows by integer degrees, so resample to 1-degree rows
+        Hc1 = np.repeat(Hc, 2, axis=0)
+        return manhattan(Hc1, np.arange(0, 360, 1.0), rhos, ncand=4)[0][0]
+    cands = [(0.0, 0.0)] + [(r * np.sin(np.deg2rad(t)), r * np.cos(np.deg2rad(t)))
+                            for r in np.arange(0.04, rmax_pivot + 1e-9, 0.04) for t in range(0, 360, 30)]
+    ranked = sorted(((peaky(c), c) for c in cands), reverse=True)
+    short = [c for _, c in ranked[:8]] + ([(0.0, 0.0)] if (0.0, 0.0) not in [c for _, c in ranked[:8]] else [])
+    scored = sorted(((rect(c), c) for c in short), reverse=True)
+    best_s, best = scored[0]
+    for step in (0.02, 0.01, 0.005):
+        for _ in range(3):
+            local = [(best[0] + dx, best[1] + dy) for dx in (-step, 0, step) for dy in (-step, 0, step) if dx or dy]
+            s2, c2 = max(((rect(c), c) for c in local))
+            if s2 <= best_s:
+                break
+            best_s, best = s2, c2
+    return best, scored[:5]
 
 
 def manhattan(Hc, phis, rhos, ncand=6, corner_w=1.0):
@@ -198,16 +240,20 @@ def free_peaks(Hc, phis, rhos, n=6):
 
 
 def run(sess, prefix, offsets, flip=False, mirror=False, spots=None, rmax=5.0, plot=True, source="sweep", mics_used=(0, 1),
-        anchor=None, band=None):
+        anchor=None, band=None, pivot=(0.0, 0.0)):
     man, sr, data, med = load(sess, spots, source, anchor, band)
+    pivot_search = None
+    if pivot == "auto":
+        pivot, pivot_search = find_pivot(data, sr, offsets, mics_used)
     phis = np.arange(0, 360, 1.0)
     rhos = np.arange(0.3, rmax, 0.005)
-    H = score(data, sr, offsets, phis, rhos, flip, mirror, mics_used)
+    H = score(data, sr, offsets, phis, rhos, flip, mirror, mics_used, pivot)
     iso = np.median(H, axis=0)
     Hc = ndimage.gaussian_filter1d(H - iso[None, :], 1.5, axis=1)
     (s, p0, dists, strengths), allp = manhattan(Hc, phis, rhos)
     sharp = float((allp.max() - np.median(allp)) / (np.std(allp) + 1e-12))
     res = {"session": man.get("version"), "direct_offset_samples": round(med, 2), "flip_yaw": flip, "mirror_x": mirror,
+           "pivot_m": [round(float(v), 3) for v in pivot],
            "manhattan": {"score": round(float(s), 1), "phi0_deg": p0, "walls": [{"bearing_deg": (p0 + 90 * j) % 360, "dist_m": round(d, 3),
                                                      "strength": round(st, 1)} for j, (d, st) in enumerate(zip(dists, strengths))],
                          "room_size_m": [round(dists[0] + dists[2], 2), round(dists[1] + dists[3], 2)],
@@ -261,6 +307,7 @@ def main():
     ap.add_argument("--spots", default=None); ap.add_argument("--rmax", type=float, default=5.0)
     ap.add_argument("--source", default="sweep", choices=["sweep", "R", "L"], help="sweep = both speakers; R/L = that speaker's chirps only")
     ap.add_argument("--mics", default="1,2", help="1 = bottom mic, 2 = back mic")
+    ap.add_argument("--pivot", default="0,0", help="phone-centre offset from the rotation axis (phone frame, m), or 'auto'")
     ap.add_argument("--anchor", type=float, default=None, help="pin back-mic direct to bottom-mic direct + this many samples (e.g. 16.5)")
     ap.add_argument("--band", default=None, help="IR band in Hz, e.g. 300,6000 (default sweep 300-16000, chirps 1000-16000)")
     a = ap.parse_args()
@@ -268,9 +315,10 @@ def main():
     spots = [int(s) for s in a.spots.split(",")] if a.spots else None
     r = run(a.sess, a.prefix, offs, a.flip_yaw, a.mirror_x, spots, a.rmax, source=a.source,
             mics_used=tuple(int(m) - 1 for m in a.mics.split(",")), anchor=a.anchor,
-            band=tuple(float(v) for v in a.band.split(",")) if a.band else None)
+            band=tuple(float(v) for v in a.band.split(",")) if a.band else None,
+            pivot="auto" if a.pivot == "auto" else tuple(float(v) for v in a.pivot.split(",")))
     m = r["manhattan"]
-    print(json.dumps({"score": m["score"], "phi0": m["phi0_deg"], "walls": [(w["bearing_deg"], w["dist_m"]) for w in m["walls"]],
+    print(json.dumps({"pivot": r["pivot_m"], "score": m["score"], "phi0": m["phi0_deg"], "walls": [(w["bearing_deg"], w["dist_m"]) for w in m["walls"]],
                       "room": m["room_size_m"], "sharp_sd": m["orientation_sharpness_sd"],
                       "truth": [(w["bearing_deg"], w["dist_m"]) for w in r.get("truth", {}).get("walls", [])]}))
 
