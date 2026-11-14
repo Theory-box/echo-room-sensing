@@ -83,3 +83,8 @@ Data: `results/sweep-20261114-134133/session.json` (+ map); raw WAVs on the user
 - Bug/design flaw: app reset yaw per spot and stored no absolute yaw → spots not in one frame. Fix pending.
 - Proposed next: slide sweep along a tape measure (several known positions on two perpendicular lines). A wall's
   range must change linearly with slide position, which coincidences can't fake across 4+ positions.
+- User clarified: spot 2 = slid ~1 ft to the user's right, NOT rotated (spot-2 frame = spot-1 end, β ≈ +44° CW).
+  Scan of slide direction at 0.30 m (`analysis/scan_offset.py`): best fit at 240–315° (toward the phone's LEFT at
+  the start), for both β=44 and β=0, only ~1.9 SD above median → a weak hint, not significant. Facing barely
+  matters, confirming per-spot direction info is weak. Consistent with the user's right = phone's left only if the
+  phone's top pointed toward the user at the start (unconfirmed).
