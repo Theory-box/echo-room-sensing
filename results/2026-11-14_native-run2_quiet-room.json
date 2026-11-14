@@ -1,0 +1,1567 @@
+{
+ "version": "echo-room-native v0.1",
+ "time": "2026-11-14T18:24:39.356Z",
+ "device": {
+  "manufacturer": "Google",
+  "model": "Pixel 11",
+  "android": "17",
+  "sdk": 37,
+  "outputSampleRate": "48000",
+  "unprocessedSupported": "true",
+  "microphones": [
+   {
+    "id": 21,
+    "desc": "builtin_mic_1",
+    "type": 15,
+    "address": "bottom",
+    "location": 1,
+    "group": 0,
+    "indexInGroup": 0,
+    "position_m": [
+     0.026900000870227814,
+     0.005799999926239252,
+     0.007899999618530273
+    ],
+    "orientation": [
+     0,
+     0,
+     1
+    ],
+    "directionality": 1,
+    "sensitivity_dBFS": 37,
+    "maxSpl": 132.5,
+    "channelMapping": []
+   },
+   {
+    "id": 22,
+    "desc": "builtin_mic_2",
+    "type": 15,
+    "address": "back",
+    "location": 1,
+    "group": 0,
+    "indexInGroup": 1,
+    "position_m": [
+     0.05460000038146973,
+     0.14560000598430634,
+     0.004149999935179949
+    ],
+    "orientation": [
+     0,
+     1,
+     0
+    ],
+    "directionality": 1,
+    "sensitivity_dBFS": -37,
+    "maxSpl": 132.5,
+    "channelMapping": []
+   },
+   {
+    "id": 33,
+    "desc": "33",
+    "type": 25,
+    "address": "0",
+    "location": 3,
+    "group": -1,
+    "indexInGroup": -1,
+    "position_m": [
+     null,
+     null,
+     null
+    ],
+    "orientation": [
+     0,
+     0,
+     0
+    ],
+    "directionality": 0,
+    "sensitivity_dBFS": null,
+    "maxSpl": null,
+    "channelMapping": []
+   },
+   {
+    "id": 31,
+    "desc": "31",
+    "type": 28,
+    "address": "",
+    "location": 3,
+    "group": -1,
+    "indexInGroup": -1,
+    "position_m": [
+     null,
+     null,
+     null
+    ],
+    "orientation": [
+     0,
+     0,
+     0
+    ],
+    "directionality": 0,
+    "sensitivity_dBFS": null,
+    "maxSpl": null,
+    "channelMapping": []
+   }
+  ],
+  "inputDevices": [
+   {
+    "id": 21,
+    "type": 15,
+    "address": "bottom",
+    "channelCounts": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "channelIndexMasks": [
+     7,
+     15
+    ]
+   },
+   {
+    "id": 27,
+    "type": 18,
+    "address": "",
+    "channelCounts": [
+     1
+    ],
+    "channelIndexMasks": []
+   },
+   {
+    "id": 22,
+    "type": 15,
+    "address": "back",
+    "channelCounts": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "channelIndexMasks": [
+     7,
+     15
+    ]
+   },
+   {
+    "id": 33,
+    "type": 25,
+    "address": "0",
+    "channelCounts": [
+     2
+    ],
+    "channelIndexMasks": []
+   },
+   {
+    "id": 31,
+    "type": 28,
+    "address": "",
+    "channelCounts": [
+     2
+    ],
+    "channelIndexMasks": []
+   }
+  ]
+ },
+ "runs": [
+  {
+   "config": "UNPROCESSED:2",
+   "source": "UNPROCESSED",
+   "requestedChannels": 2,
+   "volume": "20/25",
+   "channels": 2,
+   "sampleRate": 48000,
+   "format": "AudioFormat: props=7 enc=4ChannelMasks: chan=0xC chan_index=0x0 chan_acn=0x0 rate=48000",
+   "activeMics": [
+    {
+     "id": 21,
+     "desc": "21",
+     "type": 15,
+     "address": "bottom",
+     "location": 1,
+     "group": -1,
+     "indexInGroup": -1,
+     "position_m": [
+      null,
+      null,
+      null
+     ],
+     "orientation": [
+      0,
+      0,
+      0
+     ],
+     "directionality": 0,
+     "sensitivity_dBFS": null,
+     "maxSpl": null,
+     "channelMapping": [
+      "0:1",
+      "1:1"
+     ]
+    }
+   ],
+   "frames": 633600,
+   "analysis": {
+    "offsetSamples": 32247,
+    "alignConf": 5096,
+    "noiseFloor_dBFS": [
+     -74.4,
+     -73.6
+    ],
+    "clippedSamples": [
+     0,
+     0
+    ],
+    "chanCorr": -0.35406,
+    "chanDiffRatio": 1.4814,
+    "ch1rel_dB": -2,
+    "channels": "DISTINCT",
+    "freqResp_dB": {
+     "100": [
+      -73,
+      -70.6
+     ],
+     "200": [
+      -43.8,
+      -43.2
+     ],
+     "300": [
+      -39.5,
+      -38.8
+     ],
+     "500": [
+      -34.9,
+      -39.4
+     ],
+     "1000": [
+      -26.5,
+      -29.2
+     ],
+     "2000": [
+      -22.9,
+      -34.2
+     ],
+     "4000": [
+      -24.7,
+      -26.5
+     ],
+     "8000": [
+      -16.3,
+      -24.9
+     ],
+     "12000": [
+      -1.6,
+      -49.2
+     ],
+     "16000": [
+      -26.4,
+      -60.4
+     ],
+     "17000": [
+      -53.2,
+      -83
+     ],
+     "18000": [
+      -39.3,
+      -76.6
+     ],
+     "19000": [
+      -41.7,
+      -75
+     ],
+     "20000": [
+      -43.5,
+      -78.4
+     ],
+     "21000": [
+      -46.1,
+      -84.2
+     ],
+     "22000": [
+      -48.4,
+      -79.8
+     ],
+     "23000": [
+      -56.3,
+      -80.4
+     ]
+    },
+    "delays": {
+     "L": [
+      2.65,
+      6.58
+     ],
+     "R": [
+      0.35,
+      21.24
+     ]
+    },
+    "audibleEchoes": {
+     "mic1": [
+      {
+       "m": 0.369,
+       "dB": -31.8
+      },
+      {
+       "m": 0.476,
+       "dB": -32.7
+      },
+      {
+       "m": 0.816,
+       "dB": -28.6
+      },
+      {
+       "m": 0.866,
+       "dB": -32.7
+      },
+      {
+       "m": 1.087,
+       "dB": -32.1
+      },
+      {
+       "m": 1.884,
+       "dB": -31.8
+      }
+     ],
+     "mic2": [
+      {
+       "m": 0.294,
+       "dB": -17.1
+      },
+      {
+       "m": 0.377,
+       "dB": -23.9
+      },
+      {
+       "m": 0.455,
+       "dB": -25.9
+      },
+      {
+       "m": 0.509,
+       "dB": -27.1
+      },
+      {
+       "m": 0.945,
+       "dB": -23.4
+      },
+      {
+       "m": 1.302,
+       "dB": -26.3
+      }
+     ]
+    },
+    "micTimeDiff_L_us": -81.9,
+    "micTimeDiff_R_us": -435.2,
+    "geometrySwing_samples": 16.96,
+    "geometrySwing_cm": 12.1,
+    "ultrasonic": [
+     {
+      "snr_dB": 81.6,
+      "echoes": [
+       {
+        "m": 0.285,
+        "dB": -33.9
+       },
+       {
+        "m": 0.439,
+        "dB": -41.5
+       },
+       {
+        "m": 0.643,
+        "dB": -43.4
+       },
+       {
+        "m": 0.782,
+        "dB": -42.9
+       },
+       {
+        "m": 1.986,
+        "dB": -42.3
+       }
+      ]
+     },
+     {
+      "snr_dB": 50.7,
+      "echoes": [
+       {
+        "m": 0.455,
+        "dB": -20.6
+       },
+       {
+        "m": 0.655,
+        "dB": -25.7
+       },
+       {
+        "m": 0.955,
+        "dB": -23.9
+       },
+       {
+        "m": 1.048,
+        "dB": -26.8
+       },
+       {
+        "m": 1.234,
+        "dB": -30.3
+       },
+       {
+        "m": 2.284,
+        "dB": -30.6
+       }
+      ]
+     }
+    ]
+   },
+   "perChannel": [
+    {
+     "ch": 1,
+     "rel_dB": 0,
+     "corrWithCh1": 1,
+     "delay": {
+      "L": 2.65,
+      "R": 0.35
+     }
+    },
+    {
+     "ch": 2,
+     "rel_dB": -2,
+     "corrWithCh1": -0.3541,
+     "delay": {
+      "L": 6.58,
+      "R": 21.24
+     }
+    }
+   ]
+  },
+  {
+   "config": "CAMCORDER:2",
+   "source": "CAMCORDER",
+   "requestedChannels": 2,
+   "volume": "20/25",
+   "channels": 2,
+   "sampleRate": 48000,
+   "format": "AudioFormat: props=7 enc=4ChannelMasks: chan=0xC chan_index=0x0 chan_acn=0x0 rate=48000",
+   "activeMics": [
+    {
+     "id": 21,
+     "desc": "builtin_mic_1",
+     "type": 15,
+     "address": "bottom",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 0,
+     "position_m": [
+      0.026900000870227814,
+      0.005799999926239252,
+      0.007899999618530273
+     ],
+     "orientation": [
+      0,
+      0,
+      1
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": 37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "0:2",
+      "1:2"
+     ]
+    },
+    {
+     "id": 22,
+     "desc": "builtin_mic_2",
+     "type": 15,
+     "address": "back",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 1,
+     "position_m": [
+      0.05460000038146973,
+      0.14560000598430634,
+      0.004149999935179949
+     ],
+     "orientation": [
+      0,
+      1,
+      0
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": -37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "0:2",
+      "1:2"
+     ]
+    }
+   ],
+   "frames": 633600,
+   "analysis": {
+    "offsetSamples": 39385,
+    "alignConf": 590.1,
+    "noiseFloor_dBFS": [
+     -54.8,
+     -55.8
+    ],
+    "clippedSamples": [
+     0,
+     0
+    ],
+    "chanCorr": -0.17779,
+    "chanDiffRatio": 1.4305,
+    "ch1rel_dB": -1.3,
+    "channels": "DISTINCT",
+    "freqResp_dB": {
+     "100": [
+      -50.9,
+      -50
+     ],
+     "200": [
+      -16.3,
+      -19.4
+     ],
+     "300": [
+      -12.3,
+      -14.5
+     ],
+     "500": [
+      -14.2,
+      -11.6
+     ],
+     "1000": [
+      -8,
+      -7.6
+     ],
+     "2000": [
+      -13.9,
+      -22.4
+     ],
+     "4000": [
+      -10.9,
+      -13.5
+     ],
+     "8000": [
+      -17.8,
+      -17.1
+     ],
+     "12000": [
+      -18.2,
+      -11.8
+     ],
+     "16000": [
+      -46.8,
+      -27.5
+     ],
+     "17000": [
+      -63.2,
+      -38.8
+     ],
+     "18000": [
+      -59.4,
+      -46.6
+     ],
+     "19000": [
+      -50.7,
+      -50
+     ],
+     "20000": [
+      -52.2,
+      -35.9
+     ],
+     "21000": [
+      -59.4,
+      -40.4
+     ],
+     "22000": [
+      -66.4,
+      -48.7
+     ],
+     "23000": [
+      -76.8,
+      -57.5
+     ]
+    },
+    "delays": {
+     "L": [
+      -60.47,
+      -63.53
+     ],
+     "R": [
+      -66.34,
+      -67.78
+     ]
+    },
+    "audibleEchoes": {
+     "mic1": [
+      {
+       "m": 0.345,
+       "dB": -28.9
+      },
+      {
+       "m": 0.448,
+       "dB": -28.2
+      },
+      {
+       "m": 0.652,
+       "dB": -27.9
+      },
+      {
+       "m": 0.688,
+       "dB": -28.6
+      },
+      {
+       "m": 0.923,
+       "dB": -27
+      },
+      {
+       "m": 1.474,
+       "dB": -29.3
+      }
+     ],
+     "mic2": [
+      {
+       "m": 0.256,
+       "dB": -14.1
+      },
+      {
+       "m": 0.291,
+       "dB": -14.7
+      },
+      {
+       "m": 0.423,
+       "dB": -14.4
+      },
+      {
+       "m": 0.466,
+       "dB": -14.4
+      },
+      {
+       "m": 0.509,
+       "dB": -16.2
+      },
+      {
+       "m": 0.581,
+       "dB": -15.9
+      }
+     ]
+    },
+    "micTimeDiff_L_us": 63.8,
+    "micTimeDiff_R_us": 30,
+    "geometrySwing_samples": 1.62,
+    "geometrySwing_cm": 1.2,
+    "ultrasonic": [
+     {
+      "snr_dB": 71.7,
+      "echoes": [
+       {
+        "m": 0.554,
+        "dB": -25.1
+       },
+       {
+        "m": 0.943,
+        "dB": -30.2
+       },
+       {
+        "m": 1.233,
+        "dB": -33.6
+       },
+       {
+        "m": 1.558,
+        "dB": -38.7
+       },
+       {
+        "m": 1.865,
+        "dB": -37.2
+       }
+      ]
+     },
+     {
+      "snr_dB": 84.2,
+      "echoes": [
+       {
+        "m": 0.554,
+        "dB": -26.6
+       },
+       {
+        "m": 0.711,
+        "dB": -29
+       },
+       {
+        "m": 1.09,
+        "dB": -32.7
+       },
+       {
+        "m": 1.379,
+        "dB": -34.4
+       },
+       {
+        "m": 1.733,
+        "dB": -36.5
+       },
+       {
+        "m": 2.004,
+        "dB": -41.3
+       }
+      ]
+     }
+    ]
+   },
+   "perChannel": [
+    {
+     "ch": 1,
+     "rel_dB": 0,
+     "corrWithCh1": 1,
+     "delay": {
+      "L": -60.47,
+      "R": -66.34
+     }
+    },
+    {
+     "ch": 2,
+     "rel_dB": -1.3,
+     "corrWithCh1": -0.1778,
+     "delay": {
+      "L": -63.53,
+      "R": -67.78
+     }
+    }
+   ]
+  },
+  {
+   "config": "MIC:2",
+   "source": "MIC",
+   "requestedChannels": 2,
+   "volume": "20/25",
+   "channels": 2,
+   "sampleRate": 48000,
+   "format": "AudioFormat: props=7 enc=4ChannelMasks: chan=0xC chan_index=0x0 chan_acn=0x0 rate=48000",
+   "activeMics": [
+    {
+     "id": 21,
+     "desc": "builtin_mic_1",
+     "type": 15,
+     "address": "bottom",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 0,
+     "position_m": [
+      0.026900000870227814,
+      0.005799999926239252,
+      0.007899999618530273
+     ],
+     "orientation": [
+      0,
+      0,
+      1
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": 37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "0:2"
+     ]
+    }
+   ],
+   "frames": 633600,
+   "analysis": {
+    "offsetSamples": 33092,
+    "alignConf": 1284.6,
+    "noiseFloor_dBFS": [
+     -57,
+     -56
+    ],
+    "clippedSamples": [
+     0,
+     0
+    ],
+    "chanCorr": 0.02434,
+    "chanDiffRatio": 2.4285,
+    "ch1rel_dB": 7,
+    "channels": "DISTINCT",
+    "freqResp_dB": {
+     "100": [
+      -56.8,
+      -56.9
+     ],
+     "200": [
+      -20.1,
+      -18.1
+     ],
+     "300": [
+      -15.8,
+      -12.3
+     ],
+     "500": [
+      -12.8,
+      -11.8
+     ],
+     "1000": [
+      -8,
+      -9.4
+     ],
+     "2000": [
+      -7.2,
+      -4.3
+     ],
+     "4000": [
+      -10.1,
+      -5
+     ],
+     "8000": [
+      -3.2,
+      -7.7
+     ],
+     "12000": [
+      -11,
+      -20.3
+     ],
+     "16000": [
+      -15.1,
+      -43.6
+     ],
+     "17000": [
+      -42.6,
+      -43
+     ],
+     "18000": [
+      -28.1,
+      -36.9
+     ],
+     "19000": [
+      -27.7,
+      -39.3
+     ],
+     "20000": [
+      -26.5,
+      -41.4
+     ],
+     "21000": [
+      -28.4,
+      -45.1
+     ],
+     "22000": [
+      -29,
+      -58.8
+     ],
+     "23000": [
+      -38.4,
+      -57.5
+     ]
+    },
+    "delays": {
+     "L": [
+      -21.9,
+      -25.97
+     ],
+     "R": [
+      -27.61,
+      -27.11
+     ]
+    },
+    "audibleEchoes": {
+     "mic1": [
+      {
+       "m": 0.264,
+       "dB": -25.7
+      },
+      {
+       "m": 0.471,
+       "dB": -27.2
+      },
+      {
+       "m": 0.503,
+       "dB": -28.9
+      },
+      {
+       "m": 0.814,
+       "dB": -25
+      },
+      {
+       "m": 1.1,
+       "dB": -28
+      },
+      {
+       "m": 1.879,
+       "dB": -28.2
+      }
+     ],
+     "mic2": [
+      {
+       "m": 0.268,
+       "dB": -26.2
+      },
+      {
+       "m": 0.314,
+       "dB": -29.4
+      },
+      {
+       "m": 0.35,
+       "dB": -29
+      },
+      {
+       "m": 0.414,
+       "dB": -34.9
+      },
+      {
+       "m": 0.447,
+       "dB": -32.9
+      },
+      {
+       "m": 0.804,
+       "dB": -32.5
+      }
+     ]
+    },
+    "micTimeDiff_L_us": 84.8,
+    "micTimeDiff_R_us": -10.4,
+    "geometrySwing_samples": 4.57,
+    "geometrySwing_cm": 3.3,
+    "ultrasonic": [
+     {
+      "snr_dB": 90.3,
+      "echoes": [
+       {
+        "m": 0.288,
+        "dB": -34.6
+       },
+       {
+        "m": 0.448,
+        "dB": -43.1
+       },
+       {
+        "m": 0.645,
+        "dB": -43.2
+       },
+       {
+        "m": 0.784,
+        "dB": -43.1
+       },
+       {
+        "m": 1.985,
+        "dB": -41.2
+       }
+      ]
+     },
+     {
+      "snr_dB": 76.5,
+      "echoes": [
+       {
+        "m": 0.344,
+        "dB": -33.4
+       },
+       {
+        "m": 0.494,
+        "dB": -40.4
+       },
+       {
+        "m": 0.78,
+        "dB": -43.5
+       },
+       {
+        "m": 0.902,
+        "dB": -41.6
+       }
+      ]
+     }
+    ]
+   },
+   "perChannel": [
+    {
+     "ch": 1,
+     "rel_dB": 0,
+     "corrWithCh1": 1,
+     "delay": {
+      "L": -21.9,
+      "R": -27.61
+     }
+    },
+    {
+     "ch": 2,
+     "rel_dB": 7,
+     "corrWithCh1": 0.0243,
+     "delay": {
+      "L": -25.97,
+      "R": -27.11
+     }
+    }
+   ]
+  },
+  {
+   "config": "VOICE_RECOGNITION:2",
+   "source": "VOICE_RECOGNITION",
+   "requestedChannels": 2,
+   "volume": "20/25",
+   "channels": 2,
+   "sampleRate": 48000,
+   "format": "AudioFormat: props=7 enc=4ChannelMasks: chan=0xC chan_index=0x0 chan_acn=0x0 rate=48000",
+   "activeMics": [
+    {
+     "id": 21,
+     "desc": "builtin_mic_1",
+     "type": 15,
+     "address": "bottom",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 0,
+     "position_m": [
+      0.026900000870227814,
+      0.005799999926239252,
+      0.007899999618530273
+     ],
+     "orientation": [
+      0,
+      0,
+      1
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": 37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "0:1"
+     ]
+    }
+   ],
+   "frames": 633600,
+   "analysis": {
+    "offsetSamples": 25969,
+    "alignConf": 2207.6,
+    "noiseFloor_dBFS": [
+     -56.8,
+     -55.8
+    ],
+    "clippedSamples": [
+     9550,
+     0
+    ],
+    "chanCorr": -0.36649,
+    "chanDiffRatio": 1.5091,
+    "ch1rel_dB": -1.7,
+    "channels": "DISTINCT",
+    "freqResp_dB": {
+     "100": [
+      -55.1,
+      -55.7
+     ],
+     "200": [
+      -26.6,
+      -25.9
+     ],
+     "300": [
+      -22.6,
+      -21.7
+     ],
+     "500": [
+      -17.8,
+      -21.9
+     ],
+     "1000": [
+      -9.4,
+      -12.2
+     ],
+     "2000": [
+      -5.9,
+      -17.3
+     ],
+     "4000": [
+      -7.6,
+      -9.8
+     ],
+     "8000": [
+      0.4,
+      -8.1
+     ],
+     "12000": [
+      9.7,
+      -28.8
+     ],
+     "16000": [
+      -9.4,
+      -43.2
+     ],
+     "17000": [
+      -33.6,
+      -65.3
+     ],
+     "18000": [
+      -22.6,
+      -60.6
+     ],
+     "19000": [
+      -25.1,
+      -58.1
+     ],
+     "20000": [
+      -26.9,
+      -61.7
+     ],
+     "21000": [
+      -29.6,
+      -66.5
+     ],
+     "22000": [
+      -31.9,
+      -62.1
+     ],
+     "23000": [
+      -39.5,
+      -63.8
+     ]
+    },
+    "delays": {
+     "L": [
+      5.04,
+      8.88
+     ],
+     "R": [
+      1.69,
+      9.83
+     ]
+    },
+    "audibleEchoes": {
+     "mic1": [
+      {
+       "m": 0.264,
+       "dB": -30.2
+      },
+      {
+       "m": 0.368,
+       "dB": -32
+      },
+      {
+       "m": 0.475,
+       "dB": -32.5
+      },
+      {
+       "m": 0.814,
+       "dB": -28.6
+      },
+      {
+       "m": 1.086,
+       "dB": -32.4
+      },
+      {
+       "m": 1.883,
+       "dB": -32
+      }
+     ],
+     "mic2": [
+      {
+       "m": 0.297,
+       "dB": -17.3
+      },
+      {
+       "m": 0.376,
+       "dB": -24.7
+      },
+      {
+       "m": 0.458,
+       "dB": -26
+      },
+      {
+       "m": 0.508,
+       "dB": -27.3
+      },
+      {
+       "m": 0.944,
+       "dB": -23.6
+      },
+      {
+       "m": 1.301,
+       "dB": -26.6
+      }
+     ]
+    },
+    "micTimeDiff_L_us": -80,
+    "micTimeDiff_R_us": -169.6,
+    "geometrySwing_samples": 4.3,
+    "geometrySwing_cm": 3.1,
+    "ultrasonic": [
+     {
+      "snr_dB": 82.7,
+      "echoes": [
+       {
+        "m": 0.284,
+        "dB": -33.8
+       },
+       {
+        "m": 0.445,
+        "dB": -41.8
+       },
+       {
+        "m": 0.645,
+        "dB": -42.6
+       },
+       {
+        "m": 0.781,
+        "dB": -42.6
+       },
+       {
+        "m": 1.985,
+        "dB": -42.2
+       }
+      ]
+     },
+     {
+      "snr_dB": 51.2,
+      "echoes": [
+       {
+        "m": 0.46,
+        "dB": -21.6
+       },
+       {
+        "m": 0.632,
+        "dB": -29
+       },
+       {
+        "m": 0.968,
+        "dB": -23.5
+       },
+       {
+        "m": 1.211,
+        "dB": -26.9
+       },
+       {
+        "m": 1.629,
+        "dB": -32.1
+       },
+       {
+        "m": 2.297,
+        "dB": -29
+       }
+      ]
+     }
+    ]
+   },
+   "perChannel": [
+    {
+     "ch": 1,
+     "rel_dB": 0,
+     "corrWithCh1": 1,
+     "delay": {
+      "L": 5.04,
+      "R": 1.69
+     }
+    },
+    {
+     "ch": 2,
+     "rel_dB": -1.7,
+     "corrWithCh1": -0.3665,
+     "delay": {
+      "L": 8.88,
+      "R": 9.83
+     }
+    }
+   ]
+  },
+  {
+   "config": "UNPROCESSED:3",
+   "source": "UNPROCESSED",
+   "requestedChannels": 3,
+   "volume": "20/25",
+   "channels": 3,
+   "sampleRate": 48000,
+   "format": "AudioFormat: props=11 enc=4ChannelMasks: chan=0x0 chan_index=0x7 chan_acn=0x0 rate=48000",
+   "activeMics": [
+    {
+     "id": 21,
+     "desc": "builtin_mic_1",
+     "type": 15,
+     "address": "bottom",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 0,
+     "position_m": [
+      0.026900000870227814,
+      0.005799999926239252,
+      0.007899999618530273
+     ],
+     "orientation": [
+      0,
+      0,
+      1
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": 37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "0:1"
+     ]
+    },
+    {
+     "id": 22,
+     "desc": "builtin_mic_2",
+     "type": 15,
+     "address": "back",
+     "location": 1,
+     "group": 0,
+     "indexInGroup": 1,
+     "position_m": [
+      0.05460000038146973,
+      0.14560000598430634,
+      0.004149999935179949
+     ],
+     "orientation": [
+      0,
+      1,
+      0
+     ],
+     "directionality": 1,
+     "sensitivity_dBFS": -37,
+     "maxSpl": 132.5,
+     "channelMapping": [
+      "1:1"
+     ]
+    }
+   ],
+   "frames": 633600,
+   "analysis": {
+    "offsetSamples": 26670,
+    "alignConf": 5012.3,
+    "noiseFloor_dBFS": [
+     -74.3,
+     -73.2
+    ],
+    "clippedSamples": [
+     0,
+     0
+    ],
+    "chanCorr": -0.36877,
+    "chanDiffRatio": 1.516,
+    "ch1rel_dB": -1.6,
+    "channels": "DISTINCT",
+    "freqResp_dB": {
+     "100": [
+      -79.9,
+      -78.6
+     ],
+     "200": [
+      -43.6,
+      -42.9
+     ],
+     "300": [
+      -39.6,
+      -38.9
+     ],
+     "500": [
+      -34.8,
+      -39
+     ],
+     "1000": [
+      -26.5,
+      -29.2
+     ],
+     "2000": [
+      -22.8,
+      -34.5
+     ],
+     "4000": [
+      -24.6,
+      -26.9
+     ],
+     "8000": [
+      -16.6,
+      -25
+     ],
+     "12000": [
+      -1.5,
+      -45.4
+     ],
+     "16000": [
+      -26.4,
+      -59.8
+     ],
+     "17000": [
+      -51.6,
+      -82.2
+     ],
+     "18000": [
+      -39.6,
+      -77.5
+     ],
+     "19000": [
+      -42.1,
+      -75.1
+     ],
+     "20000": [
+      -43.9,
+      -79.5
+     ],
+     "21000": [
+      -46.7,
+      -83
+     ],
+     "22000": [
+      -48.9,
+      -78.8
+     ],
+     "23000": [
+      -56.6,
+      -80.5
+     ]
+    },
+    "delays": {
+     "L": [
+      2.65,
+      6.45
+     ],
+     "R": [
+      0.46,
+      21.16
+     ]
+    },
+    "audibleEchoes": {
+     "mic1": [
+      {
+       "m": 0.266,
+       "dB": -30.5
+      },
+      {
+       "m": 0.369,
+       "dB": -32
+      },
+      {
+       "m": 0.419,
+       "dB": -32.5
+      },
+      {
+       "m": 0.816,
+       "dB": -28.4
+      },
+      {
+       "m": 0.866,
+       "dB": -32.4
+      },
+      {
+       "m": 1.884,
+       "dB": -32
+      }
+     ],
+     "mic2": [
+      {
+       "m": 0.295,
+       "dB": -17.3
+      },
+      {
+       "m": 0.377,
+       "dB": -24.6
+      },
+      {
+       "m": 0.456,
+       "dB": -25.9
+      },
+      {
+       "m": 0.509,
+       "dB": -27.1
+      },
+      {
+       "m": 0.942,
+       "dB": -23.5
+      },
+      {
+       "m": 1.303,
+       "dB": -26.5
+      }
+     ]
+    },
+    "micTimeDiff_L_us": -79.2,
+    "micTimeDiff_R_us": -431.3,
+    "geometrySwing_samples": 16.9,
+    "geometrySwing_cm": 12.1,
+    "ultrasonic": [
+     {
+      "snr_dB": 83.5,
+      "echoes": [
+       {
+        "m": 0.286,
+        "dB": -33.5
+       },
+       {
+        "m": 0.45,
+        "dB": -42.2
+       },
+       {
+        "m": 0.647,
+        "dB": -42.7
+       },
+       {
+        "m": 0.779,
+        "dB": -42.2
+       },
+       {
+        "m": 1.987,
+        "dB": -42.5
+       }
+      ]
+     },
+     {
+      "snr_dB": 52.4,
+      "echoes": [
+       {
+        "m": 0.465,
+        "dB": -21.5
+       },
+       {
+        "m": 0.665,
+        "dB": -27.5
+       },
+       {
+        "m": 0.962,
+        "dB": -24.1
+       },
+       {
+        "m": 1.201,
+        "dB": -30.3
+       },
+       {
+        "m": 1.63,
+        "dB": -29.8
+       },
+       {
+        "m": 2.284,
+        "dB": -28
+       }
+      ]
+     }
+    ]
+   },
+   "perChannel": [
+    {
+     "ch": 1,
+     "rel_dB": 0,
+     "corrWithCh1": 1,
+     "delay": {
+      "L": 2.65,
+      "R": 0.46
+     }
+    },
+    {
+     "ch": 2,
+     "rel_dB": -1.6,
+     "corrWithCh1": -0.3688,
+     "delay": {
+      "L": 6.45,
+      "R": 21.16
+     }
+    },
+    {
+     "ch": 3,
+     "rel_dB": 4.9,
+     "corrWithCh1": -0.1545,
+     "delay": {
+      "L": -0.12,
+      "R": -0.21
+     }
+    }
+   ]
+  }
+ ],
+ "summary": {
+  "distinctConfigs": [
+   "UNPROCESSED:2",
+   "CAMCORDER:2",
+   "MIC:2",
+   "VOICE_RECOGNITION:2",
+   "UNPROCESSED:3"
+  ],
+  "best": "UNPROCESSED:2",
+  "verdict": "Simultaneous separate mics available (UNPROCESSED:2)."
+ }
+}

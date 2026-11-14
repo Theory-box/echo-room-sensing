@@ -20,3 +20,15 @@ adb shell am start -n io.github.theorybox.echoroom/.MainActivity --ez autorun tr
 adb shell run-as io.github.theorybox.echoroom cat files/latest.json
 ```
 Optional: `--es configs "UNPROCESSED:2,CAMCORDER:2"`.
+
+## Room sweep (stage 2 capture)
+"Start sweep" records raw stereo (UNPROCESSED; ch1 = bottom mic, ch2 = back mic) at 8 or 12
+rotation stops per spot, 1–2 spots. Spoken prompts guide the turns using the game rotation vector
+(gyro + accelerometer). Each stop: ~4.9 s signal (log sweep, 2 chirps per speaker, 8 near-ultrasonic
+chirps), saved as 32-bit float WAV. Per-session folder `files/sweep-YYYYMMDD-HHMMSS/` holds the WAVs and
+`session.json` (plan, yaw per stop, gravity, gyro during capture, per-stop analysis).
+
+Copy a session to the PC:
+```
+adb exec-out run-as io.github.theorybox.echoroom tar -cf - files/sweep-XXXX > sweep.tar
+```

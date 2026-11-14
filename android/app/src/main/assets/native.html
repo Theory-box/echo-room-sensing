@@ -23,19 +23,32 @@
 </style>
 </head>
 <body>
-<h1>Echo Room · native mic test</h1>
+<h1>Echo Room</h1>
 <div class="card">
+  <b>Room sweep</b>
   <ol>
-    <li>Phone <b>flat, screen up</b>, on a folded towel. Nothing covering the top or bottom edges.</li>
-    <li>Pick a start delay, tap <b>Run</b>, then leave the room (or stay still and quiet).</li>
-    <li>The app sets media volume to 80% itself. "All mic modes" takes about a minute.</li>
+    <li>Phone <b>flat, screen up</b>, raised a little (e.g. on a small container) so both ends hang free.</li>
+    <li>Tap <b>Start sweep</b>. After each recording the phone says <b>"Turn slowly"</b>: rotate it in place (don't slide it) until it says <b>"Stop"</b>.</li>
+    <li>Then duck down out of the way and stay quiet until the next "Turn slowly".</li>
+    <li>With 2 spots: when asked, move the phone about a foot to the side and tap <b>Continue</b>.</li>
   </ol>
+  <label>Stops per spot<select id="stops"><option value="8" selected>8 (every 45°)</option><option value="12">12 (every 30°)</option></select></label>
+  <label>Spots<select id="spots"><option value="1">1</option><option value="2" selected>2</option></select></label>
+  <label>Time to duck before each recording<select id="duck"><option value="2">2 s</option><option value="3" selected>3 s</option><option value="5">5 s</option></select></label>
+  <label>Start delay<select id="sdelay"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="30">30 s</option></select></label>
+  <button id="sweep">Start sweep</button>
+  <button id="cont" style="display:none">Continue (phone moved)</button>
+  <div id="angle" style="font-size:2.2em;font-weight:600;text-align:center;min-height:1.2em"></div>
 </div>
-<label>Test<select id="cfg"><option value="all">All mic modes (~1 min)</option></select></label>
-<label>Start delay<select id="delay"><option value="0">None</option><option value="10" selected>10 s</option><option value="30">30 s</option></select></label>
-<button id="run">Run</button>
 <div id="status" class="mut"></div>
 <div class="bar"><div id="prog"></div></div>
+
+<details class="card">
+  <summary><b>Mic test</b> (all recording modes, about 1 min)</summary>
+  <label>Test<select id="cfg"><option value="all">All mic modes</option></select></label>
+  <label>Start delay<select id="delay"><option value="0">None</option><option value="10" selected>10 s</option><option value="30">30 s</option></select></label>
+  <button id="run">Run mic test</button>
+</details>
 
 <div class="card" id="resultscard" style="display:none">
   <div id="verdicts"></div>
@@ -67,7 +80,7 @@ function b64ToF32(b) {
 // Per-channel level, similarity to channel 1, and direct-path delay from each speaker.
 function chanStats(chs, P, offset) {
   const sr = P.sr, S = x => Math.round(x * sr), pre = S(0.002), win = S(0.12);
-  const cb = offset + P.chirpA.L[0], ce = offset + P.chirpA.L[3] + S(0.25);
+  const cb = offset + P.chirpA.L[0], ce = offset + P.chirpA.L[P.chirpA.L.length - 1] + S(P.chirpTail || 0.25);
   const r0 = rms(chs[0], cb, ce);
   return chs.map((ch, k) => {
     const rk = rms(ch, cb, ce); let dot = 0;
@@ -137,7 +150,7 @@ async function runAll(configs, delay) {
     for (let k = 0; k < configs.length; k++) {
       const [src, ch] = configs[k].split(':'), run = { config: configs[k] };
       const label = `Run ${k + 1}/${configs.length} (${src}, ${ch} ch)`;
-      const st0 = Native.start(b64, sr, src, +ch);
+      const st0 = Native.start(b64, sr, src, +ch, '');
       if (st0 !== 'ok') throw new Error('start: ' + st0);
       for (;;) {
         const [st, pr] = Native.poll().split('|');
@@ -167,6 +180,137 @@ async function runAll(configs, delay) {
   try { report.savedTo = Native.save(textReport(report)); } catch (e) { }
   busy = false; $('run').disabled = false;
 }
+
+// ---------- Room sweep ----------
+// Short capture (~4.9 s): 0.4 s silence, 1.5 s log sweep (both speakers), 2 chirps per speaker,
+// 8 near-ultrasonic chirps. Raw stereo (UNPROCESSED, bottom mic = ch1, back mic = ch2) saved as WAV.
+function makeSweepPlan(sr) {
+  const S = x => Math.round(x * sr);
+  const P = { sr, A: 0.4, total: S(4.9), noiseWin: [0.05, 0.35], chirpTail: 0.15,
+    sweep: { start: S(0.4), f1: 50, f2: 23500, T: 1.5 },
+    chirpA: { f0: 1000, f1: 18000, T: 0.06, L: [S(2.1), S(2.3)], R: [S(2.5), S(2.7)] },
+    us: { f0: 18000, f1: 22000, T: 0.04, starts: Array.from({ length: 8 }, (_, k) => S(3.0) + k * S(0.21)) } };
+  P.sweepSig = logSweep(sr, P.sweep.f1, P.sweep.f2, P.sweep.T);
+  P.chirpSig = linChirp(sr, P.chirpA.f0, P.chirpA.f1, P.chirpA.T, 'tukey');
+  P.usSig = linChirp(sr, P.us.f0, P.us.f1, P.us.T, 'hann');
+  return P;
+}
+const ori = () => JSON.parse(Native.orientation());
+const angDiff = (a, b) => { let d = (a - b) % 360; if (d > 180) d -= 360; if (d < -180) d += 360; return d; };
+async function waitSpeech() { await sleep(200); for (let i = 0; i < 100 && Native.speaking(); i++) await sleep(100); await sleep(250); }
+async function say(t) { if (Native.say(t)) await waitSpeech(); else { Native.beep(); await sleep(600); } }
+
+// Unwrapped yaw, tracked continuously while the sweep runs.
+let yawUnwrapped = 0, yawLast = null, yawTimer = null;
+function startYawTracking() {
+  yawLast = ori().yaw; yawUnwrapped = 0;
+  yawTimer = setInterval(() => { const y = ori().yaw; yawUnwrapped += angDiff(y, yawLast); yawLast = y; }, 30);
+}
+function stopYawTracking() { clearInterval(yawTimer); yawTimer = null; }
+
+// Guide the user to `target` (deg, unwrapped, relative to spot start). dir: +1/-1, or 0 = learn from first turn.
+async function guideTo(target, dir) {
+  await say('Turn slowly');
+  let still = 0, saidStop = false, lastHint = 0;
+  for (;;) {
+    const now = Date.now(), o = ori();
+    if (dir === 0 && Math.abs(yawUnwrapped) > 10) dir = Math.sign(yawUnwrapped);
+    const tgt = dir === 0 ? null : dir * target;
+    const err = tgt === null ? null : (yawUnwrapped - tgt) * dir;   // < 0: keep turning, > 0: overshot
+    $('angle').textContent = Math.round(Math.abs(yawUnwrapped)) + '° → ' + target + '°';
+    if (err !== null && Math.abs(err) <= 4) {
+      if (!saidStop) { Native.say('Stop'); saidStop = true; }
+      still = o.gyro < 0.06 ? still + 100 : 0;
+      if (still >= 800) break;
+    } else {
+      still = 0;
+      if (err !== null && err > 4 && now - lastHint > 2500) { Native.say('Back a little'); lastHint = now; saidStop = false; }
+      else if (err !== null && err < -4 && saidStop && now - lastHint > 2500) { Native.say('Keep turning'); lastHint = now; saidStop = false; }
+    }
+    await sleep(100);
+  }
+  await waitSpeech();
+  return dir;
+}
+
+async function captureOnce(b64, P, saveRel) {
+  const st0 = Native.start(b64, P.sr, 'UNPROCESSED', 2, saveRel);
+  if (st0 !== 'ok') throw new Error('start: ' + st0);
+  while (Native.poll().split('|')[0] === 'running') await sleep(150);
+  const meta = JSON.parse(Native.result());
+  if (meta.error) { Native.resultB64(); return { meta }; }
+  const x = b64ToF32(Native.resultB64()), C = meta.channels, n = Math.floor(x.length / C);
+  const chs = Array.from({ length: C }, () => new Float32Array(n));
+  for (let i = 0; i < n; i++) for (let c = 0; c < C; c++) chs[c][i] = x[i * C + c];
+  const A = analyze(chs[0], chs[1] || null, P);
+  return { meta, analysis: A, perChannel: C >= 2 ? chanStats(chs, P, A.offsetSamples) : null };
+}
+
+let waitCont = null;
+$('cont').onclick = () => { $('cont').style.display = 'none'; if (waitCont) { const f = waitCont; waitCont = null; f(); } };
+
+async function runSweep(o) {
+  if (busy) return; busy = true; $('sweep').disabled = true; $('run').disabled = true;
+  const P = makeSweepPlan(48000), pb = buildPlayback(P);
+  const inter = new Float32Array(P.total * 2);
+  for (let i = 0; i < P.total; i++) { inter[2 * i] = pb.L[i]; inter[2 * i + 1] = pb.R[i]; }
+  const b64 = f32ToB64(inter);
+  const session = Native.newSession();
+  const man = { version: 'echo-room-sweep v1', session, time: new Date().toISOString(), device: JSON.parse(Native.info()),
+    options: o, plan: { sr: P.sr, A: P.A, total: P.total, sweep: P.sweep, chirpA: { f0: 1000, f1: 18000, T: 0.06, L: P.chirpA.L, R: P.chirpA.R },
+      us: { f0: 18000, f1: 22000, T: 0.04, starts: P.us.starts }, preRollSamples: Math.round(0.4 * P.sr), channels: 'ch1 = bottom mic, ch2 = back mic (UNPROCESSED)' },
+    yawConvention: 'degrees, unwrapped, relative to the first stop of each spot; sign = direction the user turned',
+    captures: [] };
+  const step = 360 / o.stops, total = o.stops * o.spots;
+  const save = () => Native.saveSessionText('session.json', JSON.stringify(man, (k, v) => (k === '_env' || k === '_p0') ? undefined : v, 1));
+  try {
+    if (!session) throw new Error('Could not create a session folder');
+    if (!Native.hasMicPermission()) throw new Error('Microphone permission not granted.');
+    for (let t = o.delay; t > 0; t--) { setStatus(`Starting in ${t} s`, 0); await sleep(1000); }
+    let done = 0;
+    for (let spot = 1; spot <= o.spots; spot++) {
+      if (spot > 1) {
+        $('cont').style.display = '';
+        await say('Spot one done. Move the phone about one foot to the side, keep it flat, then tap continue.');
+        setStatus('Move the phone about a foot to the side, then tap Continue.', done / total);
+        await new Promise(r => { waitCont = r; });
+        for (let t = o.duck + 2; t > 0; t--) { setStatus(`Starting spot ${spot} in ${t} s`, done / total); await sleep(1000); }
+      }
+      startYawTracking();
+      let dir = 0;
+      for (let k = 0; k < o.stops; k++) {
+        const target = Math.round(k * step);
+        if (k > 0) dir = await guideTo(target, dir);
+        for (let t = o.duck; t > 0; t--) { $('angle').textContent = 'Recording in ' + t; setStatus(`Spot ${spot}, stop ${k + 1}/${o.stops}: duck down`, done / total); await sleep(1000); }
+        $('angle').textContent = 'Recording';
+        let cap, tries = 0, y0, y1, g0, gyroMax;
+        do {
+          const a = ori(); y0 = yawUnwrapped; g0 = a.g; gyroMax = a.gyro;
+          const mon = setInterval(() => { gyroMax = Math.max(gyroMax, ori().gyro); }, 50);
+          cap = await captureOnce(b64, P, `spot${spot}_stop${String(k + 1).padStart(2, '0')}`);
+          clearInterval(mon); y1 = yawUnwrapped; tries++;
+        } while (tries < 2 && (cap.meta.error || !cap.analysis || cap.analysis.alignConf < 20));
+        const A = cap.analysis || {};
+        man.captures.push({ spot, stop: k + 1, targetDeg: target, yawStartDeg: +Math.abs(y0).toFixed(2), yawEndDeg: +Math.abs(y1).toFixed(2),
+          turnDir: dir, gravity: g0.map(v => +v.toFixed(3)), gyroMaxDuring: +gyroMax.toFixed(3), tries, file: cap.meta.file, meta: cap.meta,
+          qc: { alignConf: A.alignConf, offsetSamples: A.offsetSamples, channels: A.channels, noise: A.noiseFloor_dBFS,
+                usSNR: (A.ultrasonic || []).map(u => u && u.snr_dB), swing: A.geometrySwing_samples }, analysis: A, perChannel: cap.perChannel });
+        save(); done++;
+        setStatus(`Spot ${spot}, stop ${k + 1}/${o.stops} saved (sweep found: ${A.alignConf > 20 ? 'yes' : 'NO'}${gyroMax > 0.1 ? ', phone moved during recording' : ''})`, done / total);
+      }
+      stopYawTracking();
+    }
+    $('angle').textContent = 'Done';
+    setStatus(`Sweep complete: ${done} recordings saved in ${session}. Plug the phone in so the PC can copy them.`, 1);
+    await say('Sweep complete');
+  } catch (e) {
+    man.error = String(e && e.stack || e); save();
+    setStatus('Error: ' + e.message, 1); Native.say('Something went wrong. Check the screen.');
+  }
+  stopYawTracking();
+  busy = false; $('sweep').disabled = false; $('run').disabled = false;
+}
+$('sweep').onclick = () => runSweep({ stops: +$('stops').value, spots: +$('spots').value, duck: +$('duck').value, delay: +$('sdelay').value });
 
 function onIntent() {
   const ex = JSON.parse(Native.extras());

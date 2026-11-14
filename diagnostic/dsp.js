@@ -100,7 +100,7 @@ function analyze(ch0, ch1, P){
   const offset = p - P.sweep.start;
   R.offsetSamples = offset; R.alignConf = +(ca[p]/(median(ca)+1e-12)).toFixed(1);
   // 2. levels
-  const nb = offset + S(0.1), ne = offset + S(0.9);
+  const nw = P.noiseWin || [0.1, 0.9], nb = offset + S(nw[0]), ne = offset + S(nw[1]);
   const chans = ch1 ? [ch0,ch1] : [ch0];
   R.noiseFloor_dBFS = chans.map(ch=>+db(rms(ch,nb,ne)).toFixed(1));
   R.clippedSamples = chans.map(ch=>{ let n=0; for(const v of ch) if(Math.abs(v)>0.99) n++; return n; });
@@ -108,7 +108,7 @@ function analyze(ch0, ch1, P){
   const sb=offset+P.sweep.start, se=sb+S(P.sweep.T);
   if(ch1){
     // use the left-speaker-only chirp section: asymmetric, so two real mics must differ
-    const cb=offset+P.chirpA.L[0], ce=offset+P.chirpA.L[3]+S(0.25);
+    const cb=offset+P.chirpA.L[0], ce=offset+P.chirpA.L[P.chirpA.L.length-1]+S(P.chirpTail||0.25);
     const r0=rms(ch0,cb,ce), r1=rms(ch1,cb,ce); let dot=0,d2=0;
     for(let i=cb;i<ce;i++){ dot+=ch0[i]*ch1[i]; d2+=(ch0[i]-ch1[i])**2; }
     const n=ce-cb, corr=dot/n/(r0*r1+1e-20), diff=Math.sqrt(d2/n)/(r0+1e-20);

@@ -54,3 +54,13 @@ Raw report: `results/2026-11-14_native-run1_flat-on-towel.json`
   placement unknown. Ultrasonic SNR still 52 dB on ch2.
 - UNPROCESSED:3 ch3: not reported as a mic; timing within ~1–3 samples of ch1, different content. Unknown.
 - Distances not yet validated against measurements.
+
+## Sweep mode added (2026-11-14)
+- Run 2 setup (from user): phone on a coffee container ~10 cm above the stovetop, clutter on the stove,
+  back wall ~0.3 m behind, range hood directly above, ceiling ~2 m (guess confirmed by user).
+  Rings 0.29–0.37 m (both mics) ≈ back wall; 0.45–0.65 m ≈ hood/clutter; ~1.9–2.0 m ≈ ceiling. Plausible, unmeasured.
+- App: guided rotation sweep (8×45° or 12×30°, 1–2 spots ~1 ft apart), voice prompts, duck delay,
+  raw WAV per stop + session.json. Capture shortened from ~12 s to ~4.9 s signal.
+- Rejected for now: handheld body sweep (body echo + hand motion). Upright stops not needed: with the phone
+  flat, echoes with ~zero mic TDOA at every rotation are above/below (ceiling/floor).
+- Next: pull a sweep, compute per-echo direction from mic TDOA vs yaw, plot a top-down reflector map.

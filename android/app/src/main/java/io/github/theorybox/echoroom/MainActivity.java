@@ -9,7 +9,13 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.AudioTrack;
+import android.media.ToneGenerator;
+import android.speech.tts.TextToSpeech;
 import android.media.MediaRecorder;
 import android.media.MicrophoneInfo;
 import android.os.Build;
@@ -36,6 +42,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Thin native shell: plays the test signal and records all phone mics at the same
@@ -46,10 +53,19 @@ import java.util.List;
  *                 --ez autorun true [--es configs "UNPROCESSED:2,CAMCORDER:2"] [--ei delay 10]
  * Report:       run-as io.github.theorybox.echoroom cat files/latest.json
  */
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements SensorEventListener {
     static final String TAG = "EchoRoom";
 
     private WebView web;
+    private SensorManager sm;
+    private TextToSpeech tts;
+    private volatile boolean ttsReady = false;
+    private final float[] rotMat = new float[9];
+    private final float[] orient = new float[3];
+    private volatile float yawDeg = 0f;
+    private volatile float gyroMag = 0f;
+    private final float[] gravity = new float[3];
+    private volatile String sessionDir = null;
     private volatile String extrasJson = "{}";
     private volatile String state = "idle";
     private volatile float progress = 0f;
@@ -79,7 +95,73 @@ public class MainActivity extends Activity {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
         }
+        sm = getSystemService(SensorManager.class);
+        tts = new TextToSpeech(this, status -> {
+            ttsReady = status == TextToSpeech.SUCCESS;
+            if (ttsReady) tts.setLanguage(Locale.US);
+        });
         web.loadUrl("file:///android_asset/native.html");
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY};
+        for (int t : types) {
+            Sensor s = sm.getDefaultSensor(t);
+            if (s != null) sm.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        sm.unregisterListener(this);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tts != null) tts.shutdown();
+        super.onDestroy();
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent e) {
+        switch (e.sensor.getType()) {
+            case Sensor.TYPE_GAME_ROTATION_VECTOR:
+                SensorManager.getRotationMatrixFromVector(rotMat, e.values);
+                SensorManager.getOrientation(rotMat, orient);
+                yawDeg = (float) Math.toDegrees(orient[0]);
+                break;
+            case Sensor.TYPE_GYROSCOPE:
+                gyroMag = (float) Math.sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]);
+                break;
+            case Sensor.TYPE_GRAVITY:
+                System.arraycopy(e.values, 0, gravity, 0, 3);
+                break;
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor s, int a) {
+    }
+
+    /** 32-bit float WAV (format tag 3), interleaved. */
+    private static void writeWav(File f, float[] data, int n, int channels, int sr) throws IOException {
+        int dataBytes = n * 4;
+        ByteBuffer h = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+        h.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataBytes)
+                .put("WAVE".getBytes(StandardCharsets.US_ASCII))
+                .put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16)
+                .putShort((short) 3).putShort((short) channels).putInt(sr)
+                .putInt(sr * channels * 4).putShort((short) (channels * 4)).putShort((short) 32)
+                .put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataBytes);
+        ByteBuffer b = ByteBuffer.allocate(dataBytes).order(ByteOrder.LITTLE_ENDIAN);
+        b.asFloatBuffer().put(data, 0, n);
+        try (FileOutputStream o = new FileOutputStream(f)) {
+            o.write(h.array());
+            o.write(b.array());
+        }
     }
 
     @Override
@@ -147,7 +229,7 @@ public class MainActivity extends Activity {
     }
 
     // ---------- record + play ----------
-    private void record(String b64, int sr, String source, int channels) {
+    private void record(String b64, int sr, String source, int channels, String saveRel) {
         JSONObject out = new JSONObject();
         AudioRecord rec = null;
         AudioTrack trk = null;
@@ -231,6 +313,11 @@ public class MainActivity extends Activity {
             if (writer != null) writer.join(3000);
             trk.stop();
 
+            if (saveRel != null && !saveRel.isEmpty() && sessionDir != null) {
+                File wav = new File(new File(getFilesDir(), sessionDir), saveRel + ".wav");
+                writeWav(wav, buf, got, C, sr);
+                out.put("file", sessionDir + "/" + wav.getName());
+            }
             ByteBuffer bb = ByteBuffer.allocate(got * 4).order(ByteOrder.LITTLE_ENDIAN);
             bb.asFloatBuffer().put(buf, 0, got);
             data = Base64.encodeToString(bb.array(), Base64.NO_WRAP);
@@ -295,15 +382,53 @@ public class MainActivity extends Activity {
             return o.toString();
         }
 
-        @JavascriptInterface public String start(String b64, int sr, String source, int channels) {
+        @JavascriptInterface public String start(String b64, int sr, String source, int channels, String saveRel) {
             if ("running".equals(state)) return "busy";
             if (!hasMicPermission()) return "no mic permission";
             state = "running";
             progress = 0f;
             resultMeta = null;
             resultB64 = null;
-            new Thread(() -> record(b64, sr, source, channels), "echo-record").start();
+            new Thread(() -> record(b64, sr, source, channels, saveRel), "echo-record").start();
             return "ok";
+        }
+
+        /** Yaw (deg, game rotation vector, no magnetometer), gyro magnitude (rad/s), gravity (m/s^2). */
+        @JavascriptInterface public String orientation() {
+            return "{\"yaw\":" + yawDeg + ",\"gyro\":" + gyroMag
+                    + ",\"g\":[" + gravity[0] + "," + gravity[1] + "," + gravity[2] + "]}";
+        }
+
+        @JavascriptInterface public boolean say(String text) {
+            if (!ttsReady) return false;
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "echo");
+            return true;
+        }
+
+        @JavascriptInterface public boolean speaking() { return ttsReady && tts.isSpeaking(); }
+
+        @JavascriptInterface public void beep() {
+            ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 300);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(tg::release, 500);
+        }
+
+        @JavascriptInterface public String newSession() {
+            String name = "sweep-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new java.util.Date());
+            File d = new File(getFilesDir(), name);
+            if (!d.mkdirs() && !d.isDirectory()) return "";
+            sessionDir = name;
+            return name;
+        }
+
+        @JavascriptInterface public String saveSessionText(String fileName, String text) {
+            if (sessionDir == null) return "no session";
+            try (FileOutputStream f = new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName))) {
+                f.write(text.getBytes(StandardCharsets.UTF_8));
+                return sessionDir + "/" + fileName;
+            } catch (IOException e) {
+                return "save failed: " + e;
+            }
         }
 
         @JavascriptInterface public String poll() { return state + "|" + progress; }
