@@ -142,7 +142,7 @@ function paint(theta, prof, binM, maxR, mask) {
   const half = 10 * Math.PI / 180, a = (theta - 90) * Math.PI / 180;        // ±10° wedge: direction is rough
   const step = RPX * binM / maxR;
   for (let i = 0; i < prof.length; i++) {
-    const r = i * binM; if (r < mask || r > maxR) continue;
+    const r = (i + 0.5) * binM; if (r < mask || r > maxR) continue;
     const v = prof[i]; if (v < 0.1) continue;
     actx.strokeStyle = `rgba(${Math.round(60 + 140 * v)},255,${Math.round(90 + 60 * v)},${Math.min(1, v * 0.9).toFixed(3)})`;
     actx.lineWidth = Math.max(2, step * 1.2);
@@ -151,40 +151,58 @@ function paint(theta, prof, binM, maxR, mask) {
 }
 
 // ---------- processing ----------
-let running = false, yaw0 = null, nearHist = [], sonarLog = [];
+let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
+// heading history, so each click is drawn at the heading the phone had when that click was recorded
+const yawHist = [];
+setInterval(() => {
+  try { const o = JSON.parse(Native.orientation()); yawHist.push({ t: performance.now(), y: o.yaw, g: o.gyro }); if (yawHist.length > 200) yawHist.shift(); } catch (e) { }
+}, 25);
+function yawAt(t) {   // interpolated azimuth at time t (ms)
+  if (!yawHist.length) return null;
+  let i = yawHist.length - 1; while (i > 0 && yawHist[i - 1].t > t) i--;
+  const a = yawHist[Math.max(0, i - 1)], b = yawHist[i];
+  if (b.t === a.t || t >= b.t) return b.y;
+  if (t <= a.t) return a.y;
+  return a.y + angDiff(b.y, a.y) * (t - a.t) / (b.t - a.t);
+}
+function gyroMax(ms) { let m = 0; const t = performance.now() - ms; for (const h of yawHist) if (h.t >= t) m = Math.max(m, h.g); return m; }
+function pct(a, p) { const b = Float64Array.from(a).sort(); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; }
 function profileFrom(x, maxR) {
   const ci = xcorr(x, PING.I), cq = xcorr(x, PING.Q), n = x.length, env = new Float64Array(n);
   for (let i = 0; i < n; i++) env[i] = Math.hypot(ci[i], cq[i]);
-  // direct path = strongest peak within the first ping period; the echoes follow it
-  const d = argmax(env, 0, PERIOD);
   const nb = Math.min(PERIOD - 1, Math.round(2 * maxR / C * SR));
+  // direct path = strongest peak in the first period; use the next click instead if its echo window still fits
+  // (newer data -> less lag between the audio and the heading it is drawn at)
+  let d = argmax(env, 0, PERIOD);
+  if (d + PERIOD + nb + 50 < n && env[d + PERIOD] > 0.5 * env[d]) d += PERIOD;
   const raw = env.subarray(d, d + nb);
   const peak = env[d] + 1e-12;
-  // noise floor: median of the far tail of the period (beyond max range)
-  const tail = env.subarray(d + nb, d + PERIOD - 50);
-  const noise = (tail.length > 50 ? median(tail) : median(raw)) / peak + 1e-9;
-  return { raw, peak, noise, d };
+  // noise floor: lower percentile of the tail beyond max range (the median was pushed up by late reverb)
+  const tail = env.subarray(d + nb, Math.min(n, d + PERIOD) - 50);
+  const noise = (tail.length > 50 ? pct(tail, 0.3) : pct(raw, 0.3)) / peak + 1e-9;
+  return { raw, peak, noise, d, env };
 }
 
 // Echo picking: level re direct sound with mild 1/r compensation; keep only the strongest few local peaks that
-// pass the sensitivity threshold and are within 18 dB of the strongest one; drop "echoes of echoes" (a weaker
+// pass the sensitivity threshold and are within 24 dB of the strongest one; drop "echoes of echoes" (a weaker
 // peak at ~2x..5x the distance of a stronger one: sound bouncing between the wall and you/the phone).
 function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   const nbin = Math.floor(raw.length / binS), lev = new Float64Array(nbin), b0 = Math.ceil(mask / binM);
   for (let b = 0; b < nbin; b++) {
     let m = 0; for (let i = Math.floor(b * binS); i < Math.floor((b + 1) * binS); i++) m = Math.max(m, raw[i]);
-    const r = Math.max(b * binM, 0.3), a = m / peak;
+    const r = Math.max((b + 0.5) * binM, 0.3), a = m / peak;
     lev[b] = a > 3 * noise ? 20 * Math.log10(a * r) : -120;
   }
   let pk = [];
   for (let b = Math.max(b0, 1); b < nbin - 1; b++)
-    if (lev[b] >= thr && lev[b] >= lev[b - 1] && lev[b] > lev[b + 1]) pk.push({ b, r: b * binM, l: lev[b] });
+    if (lev[b] >= thr && lev[b] >= lev[b - 1] && lev[b] > lev[b + 1]) pk.push({ b, r: (b + 0.5) * binM, l: lev[b] });
   pk.sort((x, y) => y.l - x.l);
   const best = pk.length ? pk[0].l : -120, kept = [];
   for (const q of pk) {
     if (q.l < best - 24 || kept.length >= 5) break;
     if (kept.some(k => Math.abs(q.b - k.b) < 4)) continue;                       // same echo
-    if (kept.some(k => [2, 3, 4, 5].some(n => Math.abs(q.r - n * k.r) < 0.12 + 0.04 * n))) continue;   // multiple
+    // multiple: within +-(6+2n) cm of n x a stronger echo AND at least 3 dB weaker (real objects at ~2x still show if strong)
+    if (kept.some(k => q.l < k.l - 3 && [2, 3, 4, 5].some(n => Math.abs(q.r - n * k.r) < 0.06 + 0.02 * n))) continue;
     kept.push(q);
   }
   const prof = new Float32Array(nbin);
@@ -207,7 +225,7 @@ function drawAscan(lev, kept, binM, maxR, mask, thr) {
   actxA.fillStyle = 'rgba(40,40,40,0.8)'; actxA.fillRect(X(0), 6, X(mask) - X(0), h - 28);
   actxA.strokeStyle = 'rgba(255,200,80,0.6)'; actxA.setLineDash([6, 6]); actxA.beginPath(); actxA.moveTo(X(0), Y(thr)); actxA.lineTo(X(maxR), Y(thr)); actxA.stroke(); actxA.setLineDash([]);
   actxA.strokeStyle = '#3ddc84'; actxA.lineWidth = 2; actxA.beginPath();
-  for (let b = 0; b < lev.length; b++) { const r = b * binM; if (r > maxR) break; b ? actxA.lineTo(X(r), Y(lev[b])) : actxA.moveTo(X(r), Y(lev[b])); }
+  for (let b = 0; b < lev.length; b++) { const r = (b + 0.5) * binM; if (r > maxR) break; b ? actxA.lineTo(X(r), Y(lev[b])) : actxA.moveTo(X(r), Y(lev[b])); }
   actxA.stroke(); actxA.lineWidth = 1;
   actxA.fillStyle = '#fff'; actxA.font = 'bold 18px system-ui';
   for (const q of kept) {
@@ -241,30 +259,49 @@ function micLag(e1, e2, c, half = 18, maxLag = 26) {
 }
 function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' : 'side'; }
 
-async function loop() {
-  const maxR = +$('range').value, mask = +$('mask').value;
+async function loop(gen) {
   const binM = 0.03, binS = binM * 2 / C * SR;
-  while (running) {
+  while (running && gen === loopGen) {
     const t0 = performance.now();
-    const s = Native.sonarReadBoth((AVG + 1) * PERIOD), k = s.indexOf('|');
+    try { frame(binM, binS, t0); } catch (e) { $('status').textContent = 'Processing error: ' + e.message; }
+    await sleep(Math.max(10, PERIOD / SR * 1000 - (performance.now() - t0)));
+  }
+}
+function frame(binM, binS, t0) {
+    // average fewer clicks while turning quickly (clicks at different headings shouldn't be mixed)
+    const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? 1 : AVG;
+    const L = (avg + 1) * PERIOD;
+    const s = Native.sonarReadBoth(L), k = s.indexOf('|');
+    const frames = +s.slice(0, k);
+    if (frames === lastFrames) {   // recording not advancing
+      if (!staleSince) staleSince = t0;
+      if (t0 - staleSince > 2000) $('status').textContent = 'Recording stalled (mic busy or audio route changed). Press Stop, then Start.';
+      return;
+    }
+    lastFrames = frames; staleSince = 0;
     if (s.length > k + 1) {
       const xr = b64ToF32(s.slice(k + 1)), x = new Float32Array(2 * PERIOD), x2 = new Float32Array(2 * PERIOD);
       for (let i = 0; i < 2 * PERIOD; i++) {
-        let a = 0, b = 0; for (let j = 0; j < AVG; j++) { a += xr[2 * (i + j * PERIOD)]; b += xr[2 * (i + j * PERIOD) + 1]; }
-        x[i] = a / AVG; x2[i] = b / AVG;
+        let a = 0, b = 0; for (let j = 0; j < avg; j++) { const ii = i + j * PERIOD; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
+        x[i] = a / avg; x2[i] = b / avg;
       }
-      const { raw, peak, noise, d } = profileFrom(x, +$('range').value);
+      const { raw, peak, noise, d, env } = profileFrom(x, +$('range').value);
+      if (peak < 1e-6) return;   // no click in the window yet (just started)
       const env2 = envOf(x2), raw2 = env2.subarray(d, d + raw.length);
       const o = JSON.parse(Native.orientation());
-      if (yaw0 === null) yaw0 = o.yaw;
-      const theta = angDiff(o.yaw, yaw0);   // relative to the direction faced at Start, so either phone edge works
+      // when the analysed clicks were recorded: middle of the averaged clicks, counted back from the buffer end
+      const clickIdx = d + (avg - 1) * PERIOD / 2;
+      const ageMs = (L - clickIdx) / SR * 1000 + 40;             // + ~40 ms recording latency
+      const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
+      if (yaw0 === null) yaw0 = yawUse;
+      const theta = angDiff(yawUse, yaw0);   // relative to the direction faced at Start, so either phone edge works
       const land = $('hold').value === 'land';
       const gn = Math.hypot(o.g[0], o.g[1], o.g[2]) || 9.81;
       const tilt = Math.asin(Math.max(-1, Math.min(1, o.g[1] / gn)));   // elevation of the phone's long axis
       const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
-      const directLag = micLag(raw, raw2, 0, 10, 26);
+      const directLag = micLag(env, env2, d, 10, 26);   // full window around the click (not one-sided)
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
@@ -288,7 +325,7 @@ async function loop() {
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
         hold: land ? 'land' : 'fwd', tilt: +(tilt * 180 / Math.PI).toFixed(1),
-        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], q.ang === undefined ? null : +q.ang.toFixed(1)]) });
+        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], q.ang === undefined ? null : +q.ang.toFixed(1)]) });
       if (sonarLog.length > 4000) sonarLog.shift();
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
@@ -301,10 +338,8 @@ async function loop() {
       const nd = vals.length >= 3 ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
-      $('status').textContent = `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame, mic check ${directLag > 5 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`;
+      $('status').textContent = `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`;
     }
-    await sleep(Math.max(10, PERIOD / SR * 1000 - (performance.now() - t0)));
-  }
 }
 
 async function start() {
@@ -318,10 +353,11 @@ async function start() {
   for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; return; }
-  running = true; yaw0 = null; nearHist = []; clearAcc();
+  running = true; yaw0 = null; nearHist = []; lastFrames = -1; staleSince = 0; clearAcc();
+  const gen = ++loopGen;          // any older loop sees a different generation and exits
   $('go').textContent = 'Stop';
   await sleep(300);
-  loop();
+  if (running && gen === loopGen) loop(gen);
 }
 function saveLog() {
   if (!sonarLog.length) return;
@@ -330,15 +366,17 @@ function saveLog() {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
       settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
                   range: $('range').value, dirFilter: $('dirf').value },
-      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b]; h = heading deg; dl = direct-sound lag', frames: sonarLog }));
+      format: 'e = [distance m, level dB, mic lag samples (+ = ahead/right), class a/s/b, angle deg (+ = right, landscape only)]; h = heading deg at click time; dl = direct-sound lag; avg = clicks averaged', frames: sonarLog }));
   } catch (e) { }
   sonarLog = [];
 }
-function stop() { running = false; Native.sonarStop(); $('go').textContent = 'Start sonar'; saveLog(); }
-window.onSonarStopped = () => { running = false; $('go').textContent = 'Start sonar'; saveLog(); };
-$('go').onclick = () => running ? stop() : start();
+function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; saveLog(); }
+// user-initiated stop (button / Back): also hand the media volume back; restarts for setting changes keep it
+function stopByUser() { stop(); try { Native.sonarRestoreVolume(); } catch (e) { } }
+window.onSonarStopped = () => { running = false; loopGen++; $('go').textContent = 'Start sonar'; saveLog(); };
+$('go').onclick = () => running ? stopByUser() : start();
 $('clear').onclick = () => { clearAcc(); yaw0 = null; };
-$('back').onclick = () => { stop(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
+$('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = $('mask').onchange = $('sens').onchange = () => clearAcc();
 $('ping').onchange = $('rate').onchange = () => { if (running) { stop(); start(); } };
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
@@ -362,7 +400,7 @@ function applyHold() {
   $('howland').style.display = land ? '' : 'none'; $('howfwd').style.display = land ? 'none' : '';
   try { Native.setOrient(land ? 'landscape' : 'reverse'); } catch (e) { try { Native.setReversed(!land); } catch (e2) { } }
 }
-$('hold').onchange = () => { clearAcc(); applyHold(); };
+$('hold').onchange = () => { clearAcc(); yaw0 = null; applyHold(); };
 placeButtons(); applyHold();   // bottom-edge forward: screen rotated 180°; landscape: screen landscape (bottom edge on the right)
 </script>
 </body>

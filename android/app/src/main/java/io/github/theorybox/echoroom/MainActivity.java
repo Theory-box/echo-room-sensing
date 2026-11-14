@@ -75,9 +75,12 @@ public class MainActivity extends Activity implements SensorEventListener {
     private long ringFrames = 0;          // total frames written
     private int ringCap = 0;              // capacity in frames
     private final Object ringLock = new Object();
+    private volatile int sonarGen = 0;             // each start gets a new generation; an old record thread exits on mismatch
+    private int savedVolume = -1;         // user's media volume before the radar started (restored on stop)
 
-    private String startSonar(String pingB64, int periodFrames, int sr) {
+    private synchronized String startSonar(String pingB64, int periodFrames, int sr) {
         stopSonar();
+        AudioRecord recOrNull = null;
         try {
             byte[] pb = Base64.decode(pingB64, Base64.DEFAULT);
             FloatBuffer fb = ByteBuffer.wrap(pb).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
@@ -87,6 +90,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             for (int i = 0; i < ping.length && i < periodFrames; i++) stereo[2 * i + 1] = ping[i];   // R = bottom speaker
             AudioManager am = getSystemService(AudioManager.class);
             int mx = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            if (savedVolume < 0) savedVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
             am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(mx * 0.8f), 0);
             sonarTrack = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -104,6 +108,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                             .setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build())
                     .setBufferSizeInBytes(sr * 2 * 4)
                     .build();
+            recOrNull = rec;
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
             synchronized (ringLock) {
                 ringCap = sr * 2;
@@ -111,13 +116,15 @@ public class MainActivity extends Activity implements SensorEventListener {
                 ringFrames = 0;
             }
             sonarOn = true;
+            final int myGen = ++sonarGen;
             rec.startRecording();
             sonarTrack.play();
+            recOrNull = null;   // owned by the thread from here on
             sonarThread = new Thread(() -> {
                 float[] buf = new float[1024 * 2];
                 long lastVol = 0;
                 try {
-                    while (sonarOn) {
+                    while (sonarOn && myGen == sonarGen) {
                         long now = System.currentTimeMillis();
                         if (now - lastVol > 500) {          // hold media volume at 80% while the radar runs
                             lastVol = now;
@@ -127,7 +134,8 @@ public class MainActivity extends Activity implements SensorEventListener {
                                 amv.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
                         }
                         int n = rec.read(buf, 0, buf.length, AudioRecord.READ_BLOCKING);
-                        if (n <= 0) continue;
+                        if (n < 0) { Log.e(TAG, "sonar read error " + n); break; }   // stops advancing -> JS shows "stalled"
+                        if (n == 0) continue;
                         synchronized (ringLock) {
                             int frames = n / 2;
                             for (int f = 0; f < frames; f++) {
@@ -139,7 +147,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                         }
                     }
                 } finally {
-                    rec.stop();
+                    try { rec.stop(); } catch (Throwable ignored) { }
                     rec.release();
                 }
             }, "sonar-record");
@@ -147,21 +155,31 @@ public class MainActivity extends Activity implements SensorEventListener {
             return "ok";
         } catch (Throwable t) {
             Log.e(TAG, "sonar start failed", t);
+            if (recOrNull != null) recOrNull.release();
             stopSonar();
             return "error: " + t;
         }
     }
 
-    private void stopSonar() {
+    private synchronized void stopSonar() {
         sonarOn = false;
+        sonarGen++;
         if (sonarThread != null) {
-            try { sonarThread.join(500); } catch (InterruptedException ignored) { }
+            try { sonarThread.join(1500); } catch (InterruptedException ignored) { }
             sonarThread = null;
         }
         if (sonarTrack != null) {
             try { sonarTrack.stop(); } catch (Throwable ignored) { }
             sonarTrack.release();
             sonarTrack = null;
+        }
+    }
+
+    /** Called when the user really leaves the radar (Back / app paused): give the media volume back. */
+    private synchronized void restoreVolume() {
+        if (savedVolume >= 0) {
+            getSystemService(AudioManager.class).setStreamVolume(AudioManager.STREAM_MUSIC, savedVolume, 0);
+            savedVolume = -1;
         }
     }
 
@@ -247,6 +265,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onPause();
         sm.unregisterListener(this);
         stopSonar();   // never keep pinging in the background
+        restoreVolume();
         if (web != null) web.evaluateJavascript("window.onSonarStopped && onSonarStopped()", null);
     }
 
@@ -551,6 +570,8 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         @JavascriptInterface public void sonarStop() { stopSonar(); }
 
+        @JavascriptInterface public void sonarRestoreVolume() { restoreVolume(); }
+
         /** 'portrait' | 'reverse' (bottom edge forward) | 'landscape' (upright, bottom edge on the right). */
         @JavascriptInterface public void setOrient(String mode) {
             final int o = "reverse".equals(mode) ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
@@ -571,7 +592,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         @JavascriptInterface public String sonarReadBoth(int frames) { return getSonarBoth(frames); }
 
         @JavascriptInterface public String newSession() {
-            String name = "sweep-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new java.util.Date());
+            String name = "sweep-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(new java.util.Date());
             File d = new File(getFilesDir(), name);
             if (!d.mkdirs() && !d.isDirectory()) return "";
             sessionDir = name;
