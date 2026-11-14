@@ -50,6 +50,12 @@
   <button id="run">Run mic test</button>
 </details>
 
+<details class="card">
+  <summary><b>Scratch test</b> (which channel is which mic, ~30 s)</summary>
+  <p class="mut">Hold the phone. It names a spot (top edge, bottom edge, camera bump, middle of the back); scratch it lightly with a fingernail until it says "Stop".</p>
+  <button id="scratch">Run scratch test</button>
+</details>
+
 <div class="card" id="resultscard" style="display:none">
   <div id="verdicts"></div>
   <button id="copy">Copy results</button>
@@ -208,16 +214,17 @@ function startYawTracking() {
 }
 function stopYawTracking() { clearInterval(yawTimer); yawTimer = null; }
 
-// Guide the user to `target` (deg, unwrapped, relative to spot start). dir: +1/-1, or 0 = learn from first turn.
-async function guideTo(target, dir) {
+// Guide the user to `target` (deg, relative to `base` = session yaw at this spot's first stop).
+// dir: +1/-1, or 0 = learn from the first turn.
+async function guideTo(target, dir, base) {
   await say('Turn slowly');
   let still = 0, saidStop = false, lastHint = 0;
   for (;;) {
-    const now = Date.now(), o = ori();
-    if (dir === 0 && Math.abs(yawUnwrapped) > 10) dir = Math.sign(yawUnwrapped);
+    const now = Date.now(), o = ori(), rel = yawUnwrapped - base;
+    if (dir === 0 && Math.abs(rel) > 10) dir = Math.sign(rel);
     const tgt = dir === 0 ? null : dir * target;
-    const err = tgt === null ? null : (yawUnwrapped - tgt) * dir;   // < 0: keep turning, > 0: overshot
-    $('angle').textContent = Math.round(Math.abs(yawUnwrapped)) + '° → ' + target + '°';
+    const err = tgt === null ? null : (rel - tgt) * dir;   // < 0: keep turning, > 0: overshot
+    $('angle').textContent = Math.round(Math.abs(rel)) + '° → ' + target + '°';
     if (err !== null && Math.abs(err) <= 4) {
       if (!saidStop) { Native.say('Stop'); saidStop = true; }
       still = o.gyro < 0.06 ? still + 100 : 0;
@@ -256,10 +263,11 @@ async function runSweep(o) {
   for (let i = 0; i < P.total; i++) { inter[2 * i] = pb.L[i]; inter[2 * i + 1] = pb.R[i]; }
   const b64 = f32ToB64(inter);
   const session = Native.newSession();
-  const man = { version: 'echo-room-sweep v1', session, time: new Date().toISOString(), device: JSON.parse(Native.info()),
+  const man = { version: 'echo-room-sweep v2', session, time: new Date().toISOString(), device: JSON.parse(Native.info()),
     options: o, plan: { sr: P.sr, A: P.A, total: P.total, sweep: P.sweep, chirpA: { f0: 1000, f1: 18000, T: 0.06, L: P.chirpA.L, R: P.chirpA.R },
       us: { f0: 18000, f1: 22000, T: 0.04, starts: P.us.starts }, preRollSamples: Math.round(0.4 * P.sr), channels: 'ch1 = bottom mic, ch2 = back mic (UNPROCESSED)' },
-    yawConvention: 'degrees, unwrapped, relative to the first stop of each spot; sign = direction the user turned',
+    yawConvention: 'yawSessionDeg: signed, unwrapped azimuth change since the session started (one frame for all spots; + = clockwise seen from above, screen up). yawRawDeg: sensor azimuth (game rotation vector). yawStartDeg/turnDir: legacy, per-spot magnitude and sign.',
+    moves: [],
     captures: [] };
   const step = 360 / o.stops, total = o.stops * o.spots;
   const save = () => Native.saveSessionText('session.json', JSON.stringify(man, (k, v) => (k === '_env' || k === '_p0') ? undefined : v, 1));
@@ -267,38 +275,41 @@ async function runSweep(o) {
     if (!session) throw new Error('Could not create a session folder');
     if (!Native.hasMicPermission()) throw new Error('Microphone permission not granted.');
     for (let t = o.delay; t > 0; t--) { setStatus(`Starting in ${t} s`, 0); await sleep(1000); }
-    let done = 0;
+    let done = 0, dir = 0;
+    startYawTracking();   // once per session: all spots share one yaw frame
     for (let spot = 1; spot <= o.spots; spot++) {
       if (spot > 1) {
         $('cont').style.display = '';
-        await say('Spot one done. Move the phone about one foot to the side, keep it flat, then tap continue.');
-        setStatus('Move the phone about a foot to the side, then tap Continue.', done / total);
+        const before = yawUnwrapped;
+        await say('Spot one done. Slide the phone about one foot to the side without turning it, then tap continue.');
+        setStatus('Slide the phone about a foot to the side (don\'t turn it), then tap Continue.', done / total);
         await new Promise(r => { waitCont = r; });
+        man.moves.push({ beforeSpot: spot, instruction: 'slide ~1 ft to the side, no rotation', yawChangeDuringMoveDeg: +(yawUnwrapped - before).toFixed(2) });
         for (let t = o.duck + 2; t > 0; t--) { setStatus(`Starting spot ${spot} in ${t} s`, done / total); await sleep(1000); }
       }
-      startYawTracking();
-      let dir = 0;
+      const base = yawUnwrapped;
       for (let k = 0; k < o.stops; k++) {
         const target = Math.round(k * step);
-        if (k > 0) dir = await guideTo(target, dir);
+        if (k > 0) dir = await guideTo(target, dir, base);
         for (let t = o.duck; t > 0; t--) { $('angle').textContent = 'Recording in ' + t; setStatus(`Spot ${spot}, stop ${k + 1}/${o.stops}: duck down`, done / total); await sleep(1000); }
         $('angle').textContent = 'Recording';
-        let cap, tries = 0, y0, y1, g0, gyroMax;
+        let cap, tries = 0, y0, y1, g0, gyroMax, raw0;
         do {
-          const a = ori(); y0 = yawUnwrapped; g0 = a.g; gyroMax = a.gyro;
+          const a = ori(); y0 = yawUnwrapped; g0 = a.g; gyroMax = a.gyro; raw0 = a.yaw;
           const mon = setInterval(() => { gyroMax = Math.max(gyroMax, ori().gyro); }, 50);
           cap = await captureOnce(b64, P, `spot${spot}_stop${String(k + 1).padStart(2, '0')}`);
           clearInterval(mon); y1 = yawUnwrapped; tries++;
         } while (tries < 2 && (cap.meta.error || !cap.analysis || cap.analysis.alignConf < 20));
         const A = cap.analysis || {};
-        man.captures.push({ spot, stop: k + 1, targetDeg: target, yawStartDeg: +Math.abs(y0).toFixed(2), yawEndDeg: +Math.abs(y1).toFixed(2),
+        man.captures.push({ spot, stop: k + 1, targetDeg: target,
+          yawSessionDeg: +y0.toFixed(2), yawSessionEndDeg: +y1.toFixed(2), yawRawDeg: +raw0.toFixed(2),
+          yawStartDeg: +Math.abs(y0 - base).toFixed(2), yawEndDeg: +Math.abs(y1 - base).toFixed(2),
           turnDir: dir, gravity: g0.map(v => +v.toFixed(3)), gyroMaxDuring: +gyroMax.toFixed(3), tries, file: cap.meta.file, meta: cap.meta,
           qc: { alignConf: A.alignConf, offsetSamples: A.offsetSamples, channels: A.channels, noise: A.noiseFloor_dBFS,
                 usSNR: (A.ultrasonic || []).map(u => u && u.snr_dB), swing: A.geometrySwing_samples }, analysis: A, perChannel: cap.perChannel });
         save(); done++;
         setStatus(`Spot ${spot}, stop ${k + 1}/${o.stops} saved (sweep found: ${A.alignConf > 20 ? 'yes' : 'NO'}${gyroMax > 0.1 ? ', phone moved during recording' : ''})`, done / total);
       }
-      stopYawTracking();
     }
     $('angle').textContent = 'Done';
     setStatus(`Sweep complete: ${done} recordings saved in ${session}. Plug the phone in so the PC can copy them.`, 1);
@@ -310,6 +321,47 @@ async function runSweep(o) {
   stopYawTracking();
   busy = false; $('sweep').disabled = false; $('run').disabled = false;
 }
+// ---------- Scratch test: which recording channel is which physical mic ----------
+// Records 3 channels (UNPROCESSED index mask) while the user scratches one spot at a time.
+async function runScratch() {
+  if (busy) return; busy = true; $('scratch').disabled = true;
+  const spots = [['top', 'the top edge'], ['bottom', 'the bottom edge'], ['camera', 'the camera bump'], ['back-centre', 'the middle of the back']];
+  const sr = 48000, secs = 3, silent = f32ToB64(new Float32Array(sr * secs * 2));
+  const session = Native.newSession();
+  const rep = { version: 'echo-room-scratch v1', session, time: new Date().toISOString(), device: JSON.parse(Native.info()), segments: [] };
+  try {
+    await say('Scratch test. Hold the phone. When I say a spot, scratch it lightly with a fingernail until I say stop.');
+    for (const [key, name] of spots) {
+      await say('Scratch ' + name + ' now');
+      setStatus('Scratching: ' + name, null);
+      const st0 = Native.start(silent, sr, 'UNPROCESSED', 3, 'scratch_' + key);
+      if (st0 !== 'ok') throw new Error('start: ' + st0);
+      while (Native.poll().split('|')[0] === 'running') await sleep(150);
+      const meta = JSON.parse(Native.result());
+      const seg = { spot: key, meta };
+      if (!meta.error) {
+        const x = b64ToF32(Native.resultB64()), C = meta.channels, n = Math.floor(x.length / C);
+        // high-pass (first difference) emphasises scratch noise over room hum
+        const e = new Float64Array(C);
+        for (let i = 1; i < n; i++) for (let c = 0; c < C; c++) { const d = x[i * C + c] - x[(i - 1) * C + c]; e[c] += d * d; }
+        const ref = Math.max(...e);
+        seg.level_dB = Array.from(e, v => +db(Math.sqrt(v / ref)).toFixed(1));
+      } else Native.resultB64();
+      rep.segments.push(seg);
+      Native.say('Stop'); await waitSpeech();
+    }
+    Native.saveSessionText('scratch.json', JSON.stringify(rep, null, 1));
+    const lines = rep.segments.map(s => `${s.spot}: ` + (s.level_dB ? s.level_dB.map((v, i) => `ch${i + 1} ${v} dB`).join(', ') : 'error'));
+    $('resultscard').style.display = '';
+    $('verdicts').innerHTML = '<div class="v">Loudest channel per spot (0 dB = loudest):</div>' + lines.map(l => `<div class="v">● ${l}</div>`).join('');
+    $('out').value = JSON.stringify(rep, null, 1);
+    setStatus('Scratch test done.', 1);
+    await say('Scratch test done');
+  } catch (e) { setStatus('Error: ' + e.message, 1); }
+  busy = false; $('scratch').disabled = false;
+}
+$('scratch').onclick = runScratch;
+
 $('sweep').onclick = () => runSweep({ stops: +$('stops').value, spots: +$('spots').value, duck: +$('duck').value, delay: +$('sdelay').value });
 
 function onIntent() {

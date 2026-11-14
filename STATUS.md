@@ -126,3 +126,42 @@ a bigger aperture.
 Wants autonomy in this dedicated repo (push to main to make things testable, no per-step permission asks).
 Prefers static capture. Often on the phone: keep replies lean. Not comfortable with device/dev setup, so do it
 for them where possible. Wants honest confidence estimates.
+
+## 11. Update after review (same day): simulator + rectangle wall fit
+
+Acted on the reviewing instance's suggestions (sections 7–8 above are partly superseded):
+
+- **Yaw frame fixed in the app** (not yet installed; phone was unplugged): yaw is tracked once per session, so all
+  spots share one frame (`yawSessionDeg`, signed, clockwise-positive; `yawRawDeg`; yaw change during each move).
+  The move prompt now says "slide without turning". Session format `echo-room-sweep v2`.
+- **Scratch test** added (app → "Scratch test"): records 3 channels while the user scratches the top edge, bottom
+  edge, camera bump and middle of the back, then reports which channel is loudest for each. Identifies ch3.
+- **Simulator** (`analysis/simulate.py`): rectangular room, image sources to 2nd order + floor/ceiling, real
+  mic/speaker geometry, phone-fixed body/stand taps, back-mic low-pass, noise, point-scatterer clutter, yaw and pivot
+  jitter. Writes the app's exact session format, so the real pipeline runs unchanged.
+- **Wall fit** (`analysis/fit_walls.py`): image-source model per stop and per mic (uses both the inter-mic delay
+  and each mic's ±7 cm range swing; the reviewer's point 1), scored on IR envelopes, per-distance contrast to
+  remove ceiling/floor rings. **Right-angle rectangle model:** orientation + 4 distances, scored on 4 wall echoes
+  **plus 4 corner echoes**. Corners turned out to be the strongest returns (retroreflectors) and fooled the first
+  per-direction version, which is why they're now part of the model.
+- **Simulation results** (one spot, rotate in place, 8 stops, yaw jitter 3°, pivot jitter 1.5 cm):
+
+  | Case | Orientation error | Distance error |
+  |---|---|---|
+  | Clean room | 1° | ≤0.5 cm |
+  | + 5 / 12 / 20 point scatterers | 2–4° | ≤2 cm |
+  | Room B (3.0×3.4 m, rotated 63°) | 5° | ≤0.5 cm |
+  | Room C (4.5×5.5 m, far wall 4.1 m) | 2° | ≤1 cm (after raising the search limit to 5 m) |
+  | 12 stops | 2° | ≤0.5 cm |
+
+  Controls: a flipped yaw sign or mirrored mic frame still gives the right distances but a **mirror-image /
+  rotated** layout, with ~18% lower score (8917 vs 7556). So the score can check the sign on real data.
+- **Real kitchen sweep:** inconclusive, as expected. Spots disagree; normal vs flipped yaw within 4%; orientation
+  sharpness 1.2–1.8 SD (sim 2.2–2.6); the known back wall at ~0.3 m is at the edge of the search range, inside the
+  phone's own near-field. The stove nook isn't a rectangle around the phone.
+- **Simulator limits:** no frequency-dependent absorption, furniture only as points (not planes/edges), no
+  table/counter surface under the phone, no speaker directivity. Real rooms will be harder than the sim.
+
+**Revised estimate:** rotate-in-place + rectangle fit in a sparse rectangular room: ~55–60% for correct room
+dimensions, ~45–50% for correct orientation too. **Next:** one 8-stop sweep in a sparse room with tape-measured
+distances to all 4 walls, plus the scratch test. Orbit sweep only if orientation fails.

@@ -88,3 +88,8 @@ Data: `results/sweep-20261114-134133/session.json` (+ map); raw WAVs on the user
   the start), for both β=44 and β=0, only ~1.9 SD above median → a weak hint, not significant. Facing barely
   matters, confirming per-spot direction info is weak. Consistent with the user's right = phone's left only if the
   phone's top pointed toward the user at the start (unconfirmed).
+
+## Review follow-up (2026-11-14 evening)
+See STATUS.md §11. Yaw frame fix + scratch test in the app (built, not installed: phone unplugged). Simulator and
+rectangle (walls + corners) fit validated on simulated rooms with clutter/jitter: dimensions within ~2 cm,
+orientation within ~5°. Kitchen data inconclusive. Next: sparse-room 8-stop sweep with measured walls.
