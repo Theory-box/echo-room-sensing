@@ -76,3 +76,10 @@ Data: `results/sweep-20261114-134133/session.json` (+ map); raw WAVs on the user
 - Result v1: ranges are crisp (rings), but direction is weak; only partial arcs. Coherent (carrier-phase) cross
   term gave aliasing fringes (14 cm spacing ≫ λ). Needs ground truth from the user to judge arcs.
 - Idea: range-only multi-spot trilateration (Dokmanić-style) may beat 2-mic TDOA; needs known spot positions.
+- Combining spots (`analysis/combine_spots.py`, Hough over wall lines, spot 2 ≈ 0.30 m right, "same facing"):
+  NOT conclusive. Control rotations (90/180/270°) scored as high or higher (contrast 2.86–3.07) than the
+  user-described setups (0° 2.74, 44° 2.73–2.89). Cause: per-spot direction is weak (mostly rings), so the
+  combination is range-only, and one 30 cm move lets unrelated echo ranges pair up by coincidence (busy kitchen).
+- Bug/design flaw: app reset yaw per spot and stored no absolute yaw → spots not in one frame. Fix pending.
+- Proposed next: slide sweep along a tape measure (several known positions on two perpendicular lines). A wall's
+  range must change linearly with slide position, which coincidences can't fake across 4+ positions.
