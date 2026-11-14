@@ -49,7 +49,7 @@
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
   </div>
   <div class="row">
-    <label>Sensitivity <select id="sens"><option value="auto" selected>Auto</option><option value="-34">Low</option><option value="-38">Medium</option><option value="-42">High</option></select></label>
+    <label>Sensitivity <select id="sens"><option value="auto" selected>Auto</option><option value="adaptive">Adaptive (all)</option><option value="-34">Low</option><option value="-38">Medium</option><option value="-42">High</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
   <p class="mut" id="howfwd">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
@@ -179,10 +179,14 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   }
   // Quiet modes: echoes sit lower relative to the direct sound (high pitch), so a threshold tuned for Strong hides
   // them. There, set the threshold a few dB above this click's typical echo level instead (Low/Med/High: +9/+7/+5 dB).
-  // "Auto" (any ping): threshold = this click's typical echo level + 7 dB. Fixed Low/Med/High keep the Strong-tuned
-  // levels, except for Quiet modes, where they are applied relative to the typical level (+9/+7/+5 dB).
-  const auto = thr === 'auto';
-  if (auto || /^quiet/.test($('ping').value)) {
+  // "Auto" (default): adaptive for Quiet modes, fixed Medium (-38 dB) for Strong/Mid (their tested behaviour).
+  // "Adaptive (all)": adaptive for every ping (experimental for Strong/Mid). Adaptive = this click's typical echo
+  // level + 7 dB. Fixed Low/Med/High keep the Strong-tuned levels; for Quiet modes they're applied relative to the
+  // typical level (+9/+7/+5 dB).
+  const quietPing = /^quiet/.test($('ping').value);
+  if (thr === 'auto' && !quietPing) thr = -38;
+  const auto = thr === 'auto' || thr === 'adaptive';
+  if (auto || quietPing) {
     const valid = Array.from(lev.subarray(b0)).filter(v => v > -100).sort((a, c) => a - c);
     const typ = valid.length > 8 ? valid[valid.length >> 1] : -60;
     thr = auto ? typ + 7 : Math.min(thr, typ + (thr >= -34 ? 9 : thr >= -38 ? 7 : 5));
@@ -290,7 +294,7 @@ function frame(binM, binS, t0) {
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
       const theta = angDiff(yawUse, yaw0);   // relative to the direction faced at Start, so either phone edge works
-      const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, $('sens').value === 'auto' ? 'auto' : +$('sens').value);
+      const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, isNaN(+$('sens').value) ? $('sens').value : +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
       const directLag = micLag(env, env2, d, 10, 26);   // full window around the click (not one-sided)
