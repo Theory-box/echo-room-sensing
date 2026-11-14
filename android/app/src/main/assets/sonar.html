@@ -134,6 +134,7 @@ function paint(theta, prof, binM, maxR, mask) {
 }
 
 // ---------- processing ----------
+let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // heading history, so each click is drawn at the heading the phone had when that click was recorded
 const yawHist = [];
@@ -176,6 +177,13 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
     const r = Math.max((b + 0.5) * binM, 0.3), a = m / peak;
     lev[b] = a > 3 * noise ? 20 * Math.log10(a * r) : -120;
   }
+  // Quiet modes: echoes sit lower relative to the direct sound (high pitch), so a threshold tuned for Strong hides
+  // them. There, set the threshold a few dB above this click's typical echo level instead (Low/Med/High: +9/+7/+5 dB).
+  if (/^quiet/.test($('ping').value)) {
+    const valid = Array.from(lev.subarray(b0)).filter(v => v > -100).sort((a, c) => a - c);
+    if (valid.length > 8) thr = Math.min(thr, valid[valid.length >> 1] + (thr >= -34 ? 9 : thr >= -38 ? 7 : 5));
+  }
+  lastThr = thr;
   let pk = [];
   for (let b = Math.max(b0, 1); b < nbin - 1; b++)
     if (lev[b] >= thr && lev[b] >= lev[b - 1] && lev[b] > lev[b + 1]) pk.push({ b, r: (b + 0.5) * binM, l: lev[b] });
@@ -303,7 +311,7 @@ function frame(binM, binS, t0) {
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       paint(theta, prof, binM, mR, mk);
-      drawAscan(lev, kept, binM, mR, mk, +$('sens').value);
+      drawAscan(lev, kept, binM, mR, mk, lastThr);
       drawFrame(theta, mR);
       nearHist.push(near); if (nearHist.length > 5) nearHist.shift();
       const vals = nearHist.filter(v => v !== null).sort((a, b) => a - b);
