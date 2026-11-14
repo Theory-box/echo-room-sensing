@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.theorybox.echoroom'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.theorybox.echoroom'
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName '0.1'
+    }
+
+    sourceSets {
+        // Share the DSP core (dsp.js) with the web diagnostic page.
+        main { assets.srcDirs += ['../../diagnostic'] }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

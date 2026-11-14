@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Echo Room</title>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --mut:#666; --acc:#2b6cb0; --card:#fff; --bd:#ddd; }
+  @media (prefers-color-scheme: dark){ :root{ --fg:#eee; --bg:#121212; --mut:#999; --acc:#63a4ff; --card:#1d1d1d; --bd:#333; } }
+  body{ font:16px/1.45 system-ui,sans-serif; margin:0; padding:16px; background:var(--bg); color:var(--fg); }
+  h1{ font-size:1.35em; margin:.2em 0 .4em; }
+  .card{ background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:12px 14px; margin:12px 0; }
+  ol{ padding-left:1.2em; margin:.3em 0; } li{ margin:.2em 0; }
+  label{ display:block; margin:8px 0; } select{ font:inherit; padding:6px; width:100%; margin-top:4px; }
+  button{ font:inherit; font-weight:600; padding:14px 18px; border-radius:10px; border:0; background:var(--acc); color:#fff; width:100%; margin:6px 0; }
+  button:disabled{ opacity:.45; }
+  #status{ font-weight:600; min-height:1.4em; }
+  .bar{ height:8px; background:var(--bd); border-radius:4px; overflow:hidden; } .bar>div{ height:100%; width:0; background:var(--acc); transition:width .2s; }
+  textarea{ width:100%; height:220px; font:11px/1.3 ui-monospace,monospace; box-sizing:border-box; background:var(--bg); color:var(--fg); border:1px solid var(--bd); border-radius:8px; }
+  .mut{ color:var(--mut); font-size:.9em; }
+  .ok{ color:#2f9e44; } .warn{ color:#e8a400; } .bad{ color:#e03131; }
+  .v{ margin:4px 0; }
+</style>
+</head>
+<body>
+<h1>Echo Room · native mic test</h1>
+<div class="card">
+  <ol>
+    <li>Phone <b>flat, screen up</b>, on a folded towel. Nothing covering the top or bottom edges.</li>
+    <li>Pick a start delay, tap <b>Run</b>, then leave the room (or stay still and quiet).</li>
+    <li>The app sets media volume to 80% itself. "All mic modes" takes about a minute.</li>
+  </ol>
+</div>
+<label>Test<select id="cfg"><option value="all">All mic modes (~1 min)</option></select></label>
+<label>Start delay<select id="delay"><option value="0">None</option><option value="10" selected>10 s</option><option value="30">30 s</option></select></label>
+<button id="run">Run</button>
+<div id="status" class="mut"></div>
+<div class="bar"><div id="prog"></div></div>
+
+<div class="card" id="resultscard" style="display:none">
+  <div id="verdicts"></div>
+  <button id="copy">Copy results</button>
+  <div id="copymsg" class="mut"></div>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script src="dsp.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const ALL = ['UNPROCESSED:2', 'CAMCORDER:2', 'MIC:2', 'VOICE_RECOGNITION:2', 'UNPROCESSED:3'];
+ALL.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c.replace(':', ', ') + ' ch'; $('cfg').appendChild(o); });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const setStatus = (s, p) => { $('status').textContent = s; if (p != null) $('prog').style.width = (p * 100) + '%'; };
+
+function f32ToB64(f) {
+  const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength); let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToF32(b) {
+  const bin = atob(b), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Float32Array(u.buffer);
+}
+
+// Per-channel level, similarity to channel 1, and direct-path delay from each speaker.
+function chanStats(chs, P, offset) {
+  const sr = P.sr, S = x => Math.round(x * sr), pre = S(0.002), win = S(0.12);
+  const cb = offset + P.chirpA.L[0], ce = offset + P.chirpA.L[3] + S(0.25);
+  const r0 = rms(chs[0], cb, ce);
+  return chs.map((ch, k) => {
+    const rk = rms(ch, cb, ce); let dot = 0;
+    for (let i = Math.max(0, cb); i < Math.min(ch.length, ce); i++) dot += ch[i] * chs[0][i];
+    const o = { ch: k + 1, rel_dB: +db(rk / (r0 + 1e-20)).toFixed(1), corrWithCh1: +(dot / (ce - cb) / (rk * r0 + 1e-20)).toFixed(4), delay: {} };
+    for (const spk of ['L', 'R']) {
+      const env = profile(ch, P.chirpA[spk], offset, P.chirpSig, pre, win);
+      if (!env) { o.delay[spk] = null; continue; }
+      o.delay[spk] = +(parabolic(env, argmax(env, 0, S(0.02))) - pre).toFixed(2);
+    }
+    return o;
+  });
+}
+
+function summarize(rep) {
+  const good = rep.runs.filter(r => r.analysis && r.analysis.channels === 'DISTINCT');
+  const s = { distinctConfigs: good.map(r => r.config) };
+  if (good.length) {
+    const best = good.slice().sort((a, b) => Math.abs(b.analysis.geometrySwing_samples || 0) - Math.abs(a.analysis.geometrySwing_samples || 0))[0];
+    s.best = best.config;
+    s.verdict = 'Simultaneous separate mics available (' + best.config + ').';
+  } else s.verdict = 'No mode gave distinct mic channels.';
+  return s;
+}
+
+function textReport(r) {
+  return JSON.stringify(r, (k, v) => (k === '_env' || k === '_p0') ? undefined : v, 1);
+}
+
+function render(rep) {
+  $('resultscard').style.display = '';
+  const v = [];
+  const add = (cls, t) => v.push(`<div class="v ${cls}">● ${t}</div>`);
+  for (const r of rep.runs) {
+    if (r.error) { add('bad', `${r.config}: failed (${r.error})`); continue; }
+    const A = r.analysis || {};
+    const dist = A.channels === 'DISTINCT';
+    let t = `${r.config}: got ${r.channels} ch → ${A.channels}`;
+    if (A.geometrySwing_samples != null) t += `, swing ${A.geometrySwing_samples} smp`;
+    if (A.ultrasonic && A.ultrasonic[0]) t += `, US SNR ${A.ultrasonic[0].snr_dB} dB`;
+    if (A.alignConf != null && A.alignConf < 20) t += ' (sweep not found)';
+    add(dist ? 'ok' : 'warn', t);
+  }
+  if (rep.summary) add(rep.summary.best ? 'ok' : 'bad', rep.summary.verdict);
+  if (rep.error) add('bad', 'Error: ' + rep.error.split('\n')[0]);
+  $('verdicts').innerHTML = v.join('');
+  $('out').value = textReport(rep);
+}
+
+let busy = false;
+async function runAll(configs, delay) {
+  if (busy) return; busy = true; $('run').disabled = true;
+  const report = { version: 'echo-room-native v0.1', time: new Date().toISOString(), device: JSON.parse(Native.info()), runs: [] };
+  try {
+    if (!Native.hasMicPermission()) throw new Error('Microphone permission not granted. Allow it and run again.');
+    for (let t = delay; t > 0; t--) { setStatus(`Starting in ${t} s. Leave the room or stay still and quiet.`, 0); await sleep(1000); }
+    const sr = 48000, P = makePlan(sr), pb = buildPlayback(P);
+    const inter = new Float32Array(P.total * 2);
+    for (let i = 0; i < P.total; i++) { inter[2 * i] = pb.L[i]; inter[2 * i + 1] = pb.R[i]; }
+    const b64 = f32ToB64(inter);
+    for (let k = 0; k < configs.length; k++) {
+      const [src, ch] = configs[k].split(':'), run = { config: configs[k] };
+      const label = `Run ${k + 1}/${configs.length} (${src}, ${ch} ch)`;
+      const st0 = Native.start(b64, sr, src, +ch);
+      if (st0 !== 'ok') throw new Error('start: ' + st0);
+      for (;;) {
+        const [st, pr] = Native.poll().split('|');
+        setStatus(label + '...', (k + +pr) / configs.length);
+        if (st !== 'running') break;
+        await sleep(200);
+      }
+      Object.assign(run, JSON.parse(Native.result()));
+      if (!run.error) {
+        setStatus(label + ': analyzing...', (k + 1) / configs.length); await sleep(30);
+        const x = b64ToF32(Native.resultB64()), C = run.channels, n = Math.floor(x.length / C);
+        const chs = Array.from({ length: C }, () => new Float32Array(n));
+        for (let i = 0; i < n; i++) for (let c = 0; c < C; c++) chs[c][i] = x[i * C + c];
+        run.analysis = analyze(chs[0], chs[1] || null, P);
+        if (C >= 2) run.perChannel = chanStats(chs, P, run.analysis.offsetSamples);
+      }
+      report.runs.push(run); render(report);
+      await sleep(700);
+    }
+    report.summary = summarize(report);
+    setStatus('Done. Results saved; you can also tap Copy results.', 1);
+  } catch (e) {
+    report.error = String(e && e.stack || e);
+    setStatus('Error: ' + e.message, 1);
+  }
+  render(report);
+  try { report.savedTo = Native.save(textReport(report)); } catch (e) { }
+  busy = false; $('run').disabled = false;
+}
+
+function onIntent() {
+  const ex = JSON.parse(Native.extras());
+  if (ex.autorun) { Native.consumeExtras(); runAll(ex.configs ? ex.configs.split(',') : ALL, ex.delay || 0); }
+}
+window.onIntent = onIntent;
+$('run').onclick = () => { const v = $('cfg').value; runAll(v === 'all' ? ALL : [v], +$('delay').value); };
+$('copy').onclick = async () => {
+  const t = $('out').value;
+  try { await navigator.clipboard.writeText(t); $('copymsg').textContent = 'Copied. Paste it into the chat.'; }
+  catch (e) { $('out').focus(); $('out').select(); try { document.execCommand('copy'); $('copymsg').textContent = 'Copied (fallback).'; } catch (e2) { $('copymsg').textContent = 'Copy blocked: long-press the text box, Select all, Copy.'; } }
+};
+addEventListener('load', onIntent);
+</script>
+</body>
+</html>
