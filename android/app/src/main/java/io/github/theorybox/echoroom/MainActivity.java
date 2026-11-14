@@ -165,6 +165,23 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
     }
 
+    /** Latest `frames` stereo frames (both mics, same instant) as base64 interleaved float32, prefixed "totalFrames|". */
+    private String getSonarBoth(int frames) {
+        synchronized (ringLock) {
+            if (ring == null || ringFrames < frames) return "0|";
+            float[] out = new float[frames * 2];
+            long start = ringFrames - frames;
+            for (int i = 0; i < frames; i++) {
+                int pos = (int) ((start + i) % ringCap);
+                out[2 * i] = ring[2 * pos];
+                out[2 * i + 1] = ring[2 * pos + 1];
+            }
+            ByteBuffer bb = ByteBuffer.allocate(out.length * 4).order(ByteOrder.LITTLE_ENDIAN);
+            bb.asFloatBuffer().put(out);
+            return ringFrames + "|" + Base64.encodeToString(bb.array(), Base64.NO_WRAP);
+        }
+    }
+
     /** Latest `frames` samples of one channel (0 = bottom mic, 1 = back mic) as base64 float32, prefixed "totalFrames|". */
     private String getSonar(int frames, int ch) {
         synchronized (ringLock) {
@@ -542,6 +559,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         @JavascriptInterface public String sonarRead(int frames, int ch) { return getSonar(frames, ch); }
+
+        @JavascriptInterface public String sonarReadBoth(int frames) { return getSonarBoth(frames); }
 
         @JavascriptInterface public String newSession() {
             String name = "sweep-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new java.util.Date());
