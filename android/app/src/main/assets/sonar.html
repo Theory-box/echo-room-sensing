@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option></select></label>
+    <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option><option value="quietlong">Quiet (long)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
@@ -70,6 +70,9 @@ const PINGS = {
   strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9 },
   mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9 },   // louder than ultrasonic, narrower beam than strong
   quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9 },
+  // experiment: same band, but the sweep fills half of each click period (more energy -> more faint echoes);
+  // built in start() because its length depends on the click rate
+  quietlong: { sig: null, amp: 0.9, fill: 0.5 },
 };
 let PING = PINGS.strong.sig;
 let AVG = 3;     // consecutive clicks averaged before matched filtering (fewer when clicking slowly)
@@ -313,9 +316,10 @@ function frame(binM, binS, t0) {
 
 async function start() {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
-  const P = PINGS[$('ping').value]; PING = P.sig;
+  const P = PINGS[$('ping').value];
   const rate = +$('rate').value;
   PERIOD = Math.round(SR / rate);
+  PING = P.fill ? linChirp(SR, 16000, 22000, P.fill * PERIOD / SR, 'hann') : P.sig;
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
