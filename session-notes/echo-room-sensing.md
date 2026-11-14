@@ -41,3 +41,16 @@ Raw report: `results/2026-11-14_native-run1_flat-on-towel.json`
 - CAMCORDER:2 is "distinct" but activeMics shows both mics mapped (processed) to each channel → don't
   use it for timing. VOICE_RECOGNITION clipped (9623 samples). MIC:2 used only the bottom mic.
 - Summary ranking fixed to prefer raw UNPROCESSED capture.
+
+## Native app run 2 (2026-11-14 18:24 UTC, quiet room, unplugged, started from the app)
+- UNPROCESSED:2 now works (run 1 silence was the locked screen). Bottom mic → ch1, back mic → ch2, both
+  direct/raw. Noise floor -74 dBFS, sweep align conf ~5000. Best mode: UNPROCESSED:2 (= ch1+ch2 of UNPROCESSED:3).
+- Repeatability: UNPROCESSED:2 vs :3 direct-path delays agree within ~0.1 sample (~1 mm path);
+  echo peaks repeat across 4 modes within ±2 mm (e.g. ultrasonic mic1 1.985–1.987 m).
+- Ch2 − ch1 direct delay: speaker R +20.8 samples (≈14.9 cm, matches 14.2 cm mic spacing → R = bottom speaker).
+  Speaker L only +3.9 samples, and at the bottom mic L arrives just 2.3 samples after R: L does NOT behave like a
+  top earpiece ~14 cm away. Speaker layout/routing in portrait is unresolved.
+- Back mic is ~48 dB down at 18 kHz vs its 1 kHz level (bottom mic ~13 dB): maybe intrinsic (port design),
+  placement unknown. Ultrasonic SNR still 52 dB on ch2.
+- UNPROCESSED:3 ch3: not reported as a mic; timing within ~1–3 samples of ch1, different content. Unknown.
+- Distances not yet validated against measurements.
