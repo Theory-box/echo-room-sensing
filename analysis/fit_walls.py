@@ -42,11 +42,22 @@ def chirp_irs(x, sweep, sr, plan, which, band=(1000.0, 16000.0), ir_len=0.03):
     bw[inb] = signal.windows.tukey(inb.sum(), 0.2)
     reg = 1e-3 * np.max(np.abs(X)) ** 2
     L = int(ir_len * sr) + int(0.004 * sr)
+    # On real recordings the playback/record timeline is not rigid: chirps were found ~31 ms (1502 samples)
+    # earlier than the sweep predicts. So locate every chirp directly with a matched filter (both mics summed,
+    # search +-80 ms around the prediction) and window around the found arrival.
+    mf = np.abs(signal.hilbert(signal.fftconvolve(mix, ch[::-1], mode="valid")))
+    starts, found_off = [], []
+    for s in ca[which]:
+        lo = max(base + s - int(0.08 * sr), 0)
+        k = lo + int(np.argmax(mf[lo: base + s + int(0.08 * sr)]))
+        starts.append(k)
+        found_off.append(k - (base + s))
+    chirp_irs.last_offsets = found_off
     out, direct = [], []
     for chn in range(x.shape[1]):
         acc = np.zeros(L)
-        for s in ca[which]:
-            seg = x[base + s - pre: base + s - pre + win, chn]
+        for k in starts:
+            seg = x[k - pre: k - pre + win, chn]
             acc += np.fft.irfft(np.fft.rfft(seg, N) * np.conj(X) / (np.abs(X) ** 2 + reg) * bw, N)[:L]
         a = signal.hilbert(signal.resample_poly(acc / len(ca[which]), UP, 1))
         out.append(a)
@@ -61,7 +72,7 @@ def rot(alpha_deg):
     return np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
 
 
-def load(sess, spots=None, source="sweep"):
+def load(sess, spots=None, source="sweep", anchor=None, band=None):
     man = json.load(open(os.path.join(sess, "session.json"), encoding="utf-8"))
     sr = man["plan"]["sr"]
     sw = man["plan"]["sweep"]
@@ -71,12 +82,18 @@ def load(sess, spots=None, source="sweep"):
     for c in caps:
         _, x = wavfile.read(os.path.join(sess, c["file"].split("/")[-1]))
         if source == "sweep":
-            irs, direct = impulse_responses(x.astype(np.float64), sweep, sr, ir_len=0.03)
+            irs, direct = impulse_responses(x.astype(np.float64), sweep, sr, ir_len=0.03, **({"band": band} if band else {}))
         else:
-            irs, direct = chirp_irs(x.astype(np.float64), sweep, sr, man["plan"], source)
+            irs, direct = chirp_irs(x.astype(np.float64), sweep, sr, man["plan"], source, **({"band": band} if band else {}))
         out.append([c, irs, direct])
     med = float(np.median([d[1] - d[0] for _, _, d in out]))
-    for _, irs, direct in out:
+    if anchor is not None:
+        # Back mic: its earliest arrival can be a through-the-body path or a reflection, so pin it to a fixed
+        # offset from the bottom mic (measured on the sweep, airborne: ~16.5 samples).
+        med = anchor * UP
+        for _, irs, direct in out:
+            direct[1] = direct[0] + med
+    for _, irs, direct in ([] if anchor is not None else out):
         lo, hi = int(direct[0] + med - 2 * UP), int(direct[0] + med + 2 * UP) + 1
         env = np.abs(irs[1][max(lo, 0):hi])
         direct[1] = max(lo, 0) + float(np.argmax(env)) if len(env) else direct[0] + med
@@ -180,8 +197,9 @@ def free_peaks(Hc, phis, rhos, n=6):
              "rel": round(float(sm[ii[k], jj[k]] / top), 2)} for k in o]
 
 
-def run(sess, prefix, offsets, flip=False, mirror=False, spots=None, rmax=5.0, plot=True, source="sweep", mics_used=(0, 1)):
-    man, sr, data, med = load(sess, spots, source)
+def run(sess, prefix, offsets, flip=False, mirror=False, spots=None, rmax=5.0, plot=True, source="sweep", mics_used=(0, 1),
+        anchor=None, band=None):
+    man, sr, data, med = load(sess, spots, source, anchor, band)
     phis = np.arange(0, 360, 1.0)
     rhos = np.arange(0.3, rmax, 0.005)
     H = score(data, sr, offsets, phis, rhos, flip, mirror, mics_used)
@@ -243,11 +261,14 @@ def main():
     ap.add_argument("--spots", default=None); ap.add_argument("--rmax", type=float, default=5.0)
     ap.add_argument("--source", default="sweep", choices=["sweep", "R", "L"], help="sweep = both speakers; R/L = that speaker's chirps only")
     ap.add_argument("--mics", default="1,2", help="1 = bottom mic, 2 = back mic")
+    ap.add_argument("--anchor", type=float, default=None, help="pin back-mic direct to bottom-mic direct + this many samples (e.g. 16.5)")
+    ap.add_argument("--band", default=None, help="IR band in Hz, e.g. 300,6000 (default sweep 300-16000, chirps 1000-16000)")
     a = ap.parse_args()
     offs = {i + 1: tuple(map(float, s.split(","))) for i, s in enumerate(a.offsets.split(";"))}
     spots = [int(s) for s in a.spots.split(",")] if a.spots else None
     r = run(a.sess, a.prefix, offs, a.flip_yaw, a.mirror_x, spots, a.rmax, source=a.source,
-            mics_used=tuple(int(m) - 1 for m in a.mics.split(",")))
+            mics_used=tuple(int(m) - 1 for m in a.mics.split(",")), anchor=a.anchor,
+            band=tuple(float(v) for v in a.band.split(",")) if a.band else None)
     m = r["manhattan"]
     print(json.dumps({"score": m["score"], "phi0": m["phi0_deg"], "walls": [(w["bearing_deg"], w["dist_m"]) for w in m["walls"]],
                       "room": m["room_size_m"], "sharp_sd": m["orientation_sharpness_sd"],

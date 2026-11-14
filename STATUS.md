@@ -56,6 +56,11 @@ debugging authorized. The app can be driven from the PC (adb intent extras + Web
   wall (seen by both mics), 0.45–0.65 m ≈ hood/clutter, ~1.9–2.0 m ≈ ceiling. Distances unmeasured, so plausible
   but not verified.
 
+> **Correction (2026-11-14, late):** the 2-spot sweep (`sweep-20261114-134133`) was recorded in the user's
+> **living room** (less clutter), not the kitchen. Only the earlier single mic test (run 2) was on the stove.
+> Everywhere below/above that calls the sweep "kitchen" means the living room. The "stove nook isn't a rectangle"
+> explanation for inconsistent distances is therefore wrong.
+
 ## 5. Direction / mapping results (the open problem)
 
 **First room sweep** (kitchen again, 2 spots × 8 stops at 45°, rotate in place; spot 2 = slid ~1 ft to the user's
@@ -197,3 +202,34 @@ one. Checked here:
 Still open from the review: back-mic first-arrival jumps (the median re-anchoring helps; raise the phone),
 pivot drift (sim assumes 1.5 cm; a pin-through-cardboard pivot would help), and checking ranges against the
 tape measure before orientation in the sparse-room test.
+
+## 13. Third pass: retraction, timing jump, calibrated simulator, pivot drift
+
+- **Retraction:** the §12 result "both spots independently give orientation 3°" is **withdrawn**. The R-chirp
+  IR windows were misplaced: on the real recordings every chirp arrives **~1502 samples (31 ms) earlier** than the
+  sweep-based timeline predicts. The shift is constant across all 16 stops and the chirps' spacing is exact, so it's
+  a fixed jump in the phone's playback/record path between the sweep and the chirps (not clock drift). The simulator
+  has no such jump, which is why the R-chirp method looked fine there. `chirp_irs` now locates each chirp with a matched
+  filter (±80 ms search). The app should log AudioTrack underruns / timestamps to find the jump's cause.
+- **Second speaker, measured with located chirps** (matches the reviewer): bottom mic: earpiece direct −18.9 dB vs
+  bottom speaker, echo energy 0.10×; back mic: echo energy 0.40× (0.22–0.64), direct about equal (+1.1 dB). Back mic's
+  earliest arrival varies 98–120 samples between stops (airborne ≈113): through-the-body/early paths, so
+  `--anchor 16.5` pins it to bottom-mic direct + 16.5 samples.
+- **Calibrated simulator:** `--earpiece 0.32,0.63 --chassis` (per-mic earpiece gains from the measured echo energy, plus
+  body paths). With 3 cm pivot drift, the both-speaker sweep reproduces the real symptoms (sharpness 1.24, flipped gap
+  −3%).
+- **Pivot drift is the dominant factor** (`analysis/pivot_grid.py`, 4 seeds per cell, 8 scatterers, 3° yaw jitter,
+  calibrated two-speaker sim; "correct" = orientation ≤6° and every wall ≤6 cm):
+
+  | Pivot drift | Both-speaker sweep | R chirps + anchored back mic |
+  |---|---|---|
+  | 0.5 cm | 4/4 (≤2°) | 4/4 (≤2°) |
+  | 1.5 cm | 1/4 | 2/4 |
+  | 3.0 cm | 2/4 | 2/4 |
+
+  The second speaker matters much less than keeping the rotation centre fixed to within ~0.5 cm.
+- **Real sweep with corrected chirps + anchoring:** still inconclusive (spot 1 9°, spot 2 66°; flipped ≈ normal).
+  Consistent with hand-turning drift of ≥1.5 cm.
+- **Next capture must use a fixed pivot** (e.g. a pin/thumbtack through cardboard under the phone's centre, or the phone
+  taped to a plate that turns on a pin) **and the bottom-speaker-only sweep** (app v3, built, not yet installed). Then
+  check the ranges against the tape measure first, orientation second.

@@ -93,3 +93,8 @@ Data: `results/sweep-20261114-134133/session.json` (+ map); raw WAVs on the user
 See STATUS.md §11. Yaw frame fix + scratch test in the app (built, not installed: phone unplugged). Simulator and
 rectangle (walls + corners) fit validated on simulated rooms with clutter/jitter: dimensions within ~2 cm,
 orientation within ~5°. Kitchen data inconclusive. Next: sparse-room 8-stop sweep with measured walls.
+
+> **Correction (2026-11-14, late):** the 2-spot sweep (`sweep-20261114-134133`) was recorded in the user's
+> **living room** (less clutter), not the kitchen. Only the earlier single mic test (run 2) was on the stove.
+> Everywhere below/above that calls the sweep "kitchen" means the living room. The "stove nook isn't a rectangle"
+> explanation for inconsistent distances is therefore wrong.

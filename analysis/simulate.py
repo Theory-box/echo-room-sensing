@@ -114,8 +114,11 @@ def main():
     ap.add_argument("--yaw-jitter", type=float, default=2.0)
     ap.add_argument("--pos-jitter", type=float, default=0.01)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--earpiece", type=float, default=0.0,
-                    help="gain of the second (L-channel, top earpiece) speaker relative to the bottom one; 0 = single speaker")
+    ap.add_argument("--earpiece", default="0",
+                    help="gain of the second (L-channel, top earpiece) speaker relative to the bottom one, per mic: "
+                         "'g' or 'g_bottom,g_back'. Measured on the living-room sweep: 0.32,0.63 (echo energy 0.10x, 0.40x). 0 = single speaker")
+    ap.add_argument("--chassis", action="store_true",
+                    help="add through-the-body arrivals: L->bottom mic at -19 dB re R direct, R->back mic at -6 dB re its air path, both ~0.03 ms")
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     W, Lr, H = map(float, a.room.split(","))
@@ -153,13 +156,19 @@ def main():
             for mi in range(2):
                 M = centre + Rk @ MICS[mi]
                 y = np.zeros(P["total"])
-                for spk, play, gain in ((SPK, play_r, 1.0), (SPK_L, play_l, a.earpiece)):
+                eg = [float(v) for v in a.earpiece.split(",")]
+                eg = eg[mi] if len(eg) > 1 else eg[0]
+                for spk, play, gain in ((SPK, play_r, 1.0), (SPK_L, play_l, eg)):
                     if gain <= 0:
                         continue
                     S = centre + Rk @ spk
                     ir = np.zeros(int(0.08 * SR))
                     d0 = np.linalg.norm(M - S)
                     add_tap(ir, d0 / C, 1.0 / max(d0, 0.05))
+                    if a.chassis and spk is SPK and mi == 1:
+                        add_tap(ir, 0.00003, 0.5 / max(d0, 0.05))
+                    if a.chassis and spk is SPK_L and mi == 0:
+                        add_tap(ir, 0.00003, 20 * 10 ** (-19 / 20) / max(gain, 1e-3))
                     for dp, amp in ((0.06, 3.0), (0.11, 2.0), (0.16, 1.2)):        # phone body / stand, phone-fixed
                         add_tap(ir, (d0 + dp) / C, amp)
                     for q, o in image_sources(S, walls, a.order):
