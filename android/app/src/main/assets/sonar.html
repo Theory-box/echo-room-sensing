@@ -25,7 +25,7 @@
   <canvas id="ppi" width="720" height="720"></canvas>
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
-  <div class="mut" style="text-align:center">distance graph: spikes are echoes (white dots = picked), dashed line = sensitivity</div>
+  <div class="mut" style="text-align:center">distance graph: white dots = echoes ahead, blue = same in every direction (floor/ceiling), dashed line = sensitivity</div>
   <div id="dist">–</div>
   <div class="mut" style="text-align:center">nearest echo ahead</div>
   <div id="bar"><div></div></div>
@@ -91,6 +91,12 @@ function drawFrame(theta, maxR) {
     const a = (theta - 90) * Math.PI / 180;
     ctx.strokeStyle = 'rgba(120,255,160,0.9)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX + RPX * Math.cos(a), CY + RPX * Math.sin(a)); ctx.stroke();
+  }
+  for (const r of rings) {
+    if (r > maxR) continue;
+    ctx.strokeStyle = 'rgba(90,160,255,0.55)'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.arc(CX, CY, RPX * r / maxR, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(140,190,255,0.9)'; ctx.fillText('floor/ceiling ' + r.toFixed(2) + ' m', CX - RPX * r / maxR * 0.7, CY + RPX * r / maxR * 0.7 + 18);
   }
   ctx.fillStyle = '#3ddc84'; ctx.beginPath(); ctx.arc(CX, CY, 6, 0, 2 * Math.PI); ctx.fill();
 }
@@ -169,7 +175,26 @@ function drawAscan(lev, kept, binM, maxR, mask, thr) {
   for (let b = 0; b < lev.length; b++) { const r = b * binM; if (r > maxR) break; b ? actxA.lineTo(X(r), Y(lev[b])) : actxA.moveTo(X(r), Y(lev[b])); }
   actxA.stroke(); actxA.lineWidth = 1;
   actxA.fillStyle = '#fff'; actxA.font = 'bold 18px system-ui';
-  for (const q of kept) { actxA.beginPath(); actxA.arc(X(q.r), Y(q.l), 6, 0, 2 * Math.PI); actxA.fill(); actxA.fillText(q.r.toFixed(2) + ' m', X(q.r) + 8, Math.max(20, Y(q.l) - 6)); }
+  for (const q of kept) { actxA.fillStyle = q.ring ? '#7ab8ff' : '#fff'; actxA.beginPath(); actxA.arc(X(q.r), Y(q.l), 6, 0, 2 * Math.PI); actxA.fill(); actxA.fillText(q.r.toFixed(2) + ' m' + (q.ring ? ' (floor/ceiling)' : ''), X(q.r) + 8, Math.max(20, Y(q.l) - 6)); }
+}
+
+// Echoes that come back at the same distance whichever way you face are above/below you (floor, ceiling) or
+// attached to you (body): classify them as a ring instead of painting them as a wall in one direction.
+// Needs the recent pings to cover >= 90 degrees of heading; otherwise nothing is classified.
+let hist = [], rings = [];
+function classifyRings(theta, lev, kept, binM) {
+  hist.push({ theta, lev: Float64Array.from(lev) });
+  if (hist.length > 40) hist.shift();
+  const sectors = new Set(hist.map(h => Math.floor(((h.theta % 360) + 360) % 360 / 30)));
+  rings = [];
+  if (sectors.size < 4) return kept.map(q => Object.assign(q, { ring: false }));
+  for (const q of kept) {
+    const vals = hist.map(h => Math.max(h.lev[q.b - 1] ?? -120, h.lev[q.b], h.lev[q.b + 1] ?? -120)).sort((a, b) => a - b);
+    const med = vals[vals.length >> 1];
+    q.ring = med > q.l - 6;
+    if (q.ring) rings.push(q.r);
+  }
+  return kept;
 }
 
 async function loop() {
@@ -185,7 +210,13 @@ async function loop() {
       const o = JSON.parse(Native.orientation());
       if (yaw0 === null) yaw0 = o.yaw;
       const theta = angDiff(o.yaw, yaw0);   // relative to the direction faced at Start, so either phone edge works
-      const { prof, near, lev, kept } = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
+      const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
+      const { lev } = tp;
+      const kept = classifyRings(theta, lev, tp.kept, binM);
+      const prof = new Float32Array(tp.prof.length);
+      const dirKept = kept.filter(q => !q.ring);
+      for (const q of dirKept) for (let d = -1; d <= 1; d++) { const i = q.b + d; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], tp.prof[i]); }
+      const near = dirKept.length ? Math.min(...dirKept.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       paint(theta, prof, binM, mR, mk);
       drawAscan(lev, kept, binM, mR, mk, +$('sens').value);
@@ -212,7 +243,7 @@ async function start() {
   for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; return; }
-  running = true; yaw0 = null; nearHist = []; clearAcc();
+  running = true; yaw0 = null; nearHist = []; hist = []; rings = []; clearAcc();
   $('go').textContent = 'Stop';
   await sleep(300);
   loop();
@@ -220,7 +251,7 @@ async function start() {
 function stop() { running = false; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
 window.onSonarStopped = () => { running = false; $('go').textContent = 'Start sonar'; };
 $('go').onclick = () => running ? stop() : start();
-$('clear').onclick = () => { clearAcc(); yaw0 = null; };
+$('clear').onclick = () => { clearAcc(); yaw0 = null; hist = []; rings = []; };
 $('back').onclick = () => { stop(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = $('mask').onchange = $('sens').onchange = () => clearAcc();
 $('ping').onchange = $('rate').onchange = () => { if (running) { stop(); start(); } };
