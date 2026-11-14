@@ -46,18 +46,12 @@
     <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option></select></label>
   </div>
   <div class="row">
-    <label>Hold <select id="hold"><option value="fwd" selected>Bottom edge forward</option><option value="land">Landscape, back to wall</option></select></label>
-  </div>
-  <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
   </div>
   <div class="row">
     <label>Sensitivity <select id="sens"><option value="-34">Low</option><option value="-38" selected>Medium</option><option value="-42">High</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
-  <p class="mut" id="howland" style="display:none"><b>Landscape:</b> hold the phone upright like a landscape photo, <b>screen facing you, back toward the wall,
-    bottom edge (speaker) on your right</b>. Each echo gets a left/right angle from the two mics; your body blocks what's behind you.
-    Up vs down can't be told apart, so floor/ceiling may appear straight ahead.</p>
   <p class="mut" id="howfwd">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
     Echoes are painted in the direction the phone points; your body blocks most sound from behind.
     Direction is rough (tens of degrees); distance is precise. You'll hear faint ticks.</p>
@@ -120,20 +114,6 @@ function drawFrame(theta, maxR) {
     ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX, CY - RPX); ctx.stroke(); ctx.lineWidth = 1;
   }
   ctx.fillStyle = '#3ddc84'; ctx.beginPath(); ctx.arc(CX, CY, 6, 0, 2 * Math.PI); ctx.fill();
-}
-
-// Landscape: paint each echo at heading + its measured left/right angle (±6° wedge).
-function paintEchoes(theta, kept, prof, maxR, mask, clean) {
-  actx.fillStyle = 'rgba(0,0,0,0.05)'; actx.fillRect(0, 0, W, W);
-  const half = 6 * Math.PI / 180;
-  for (const q of kept) {
-    if (q.r < mask || q.r > maxR || (clean && q.dir !== 'ahead')) continue;
-    const v = prof[q.b] * (q.dir === 'ahead' ? 1 : 0.8); if (v < 0.1) continue;
-    const a = (theta + (q.ang || 0) - 90) * Math.PI / 180;
-    actx.strokeStyle = `rgba(${Math.round(60 + 140 * v)},255,${Math.round(90 + 60 * v)},${Math.min(1, v).toFixed(3)})`;
-    actx.lineWidth = Math.max(3, RPX * 0.03 / maxR * 1.5);
-    actx.beginPath(); actx.arc(CX, CY, RPX * q.r / maxR, a - half, a + half); actx.stroke();
-  }
 }
 
 // Paint one ping's range profile (values 0..1 per bin) along heading theta (deg, clockwise from start).
@@ -231,7 +211,7 @@ function drawAscan(lev, kept, binM, maxR, mask, thr) {
   for (const q of kept) {
     actxA.fillStyle = q.dir === 'behind' ? '#ff5a5a' : q.dir === 'side' ? '#9aa' : '#fff';
     actxA.beginPath(); actxA.arc(X(q.r), Y(q.l), 6, 0, 2 * Math.PI); actxA.fill();
-    const tag = q.ang !== undefined ? `, ${Math.abs(q.ang).toFixed(0)}° ${q.ang >= 0 ? 'R' : 'L'}` : (q.dir === 'behind' ? ' (behind)' : q.dir === 'side' ? ' (side)' : '');
+    const tag = q.dir === 'behind' ? ' (behind)' : q.dir === 'side' ? ' (side)' : '';
     actxA.fillText(q.r.toFixed(2) + ' m' + tag, X(q.r) + 8, Math.max(20, Y(q.l) - 6));
   }
 }
@@ -295,9 +275,6 @@ function frame(binM, binS, t0) {
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
       const theta = angDiff(yawUse, yaw0);   // relative to the direction faced at Start, so either phone edge works
-      const land = $('hold').value === 'land';
-      const gn = Math.hypot(o.g[0], o.g[1], o.g[2]) || 9.81;
-      const tilt = Math.asin(Math.max(-1, Math.min(1, o.g[1] / gn)));   // elevation of the phone's long axis
       const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
@@ -308,12 +285,6 @@ function frame(binM, binS, t0) {
         q.lag = micLag(raw, raw2, i0);
         q.cos = Math.max(-1, Math.min(1, q.lag / MIC_LAG));
         q.dir = classify(q.cos);
-        if (land) {
-          // mic axis = phone's long axis, horizontal when held landscape; tilt (axis elevation) shrinks the lag by cos(tilt)
-          const ct = Math.max(0.5, Math.cos(tilt));
-          q.ang = Math.asin(Math.max(-1, Math.min(1, q.lag / (MIC_LAG * ct)))) * 180 / Math.PI;   // + = to the right
-          q.dir = Math.abs(q.ang) <= 12 ? 'ahead' : 'side';
-        }
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
@@ -324,13 +295,11 @@ function frame(binM, binS, t0) {
       const front = kept.filter(q => q.dir === 'ahead');   // distance readout: confirmed-ahead echoes only
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
-        hold: land ? 'land' : 'fwd', tilt: +(tilt * 180 / Math.PI).toFixed(1),
-        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], q.ang === undefined ? null : +q.ang.toFixed(1)]) });
+        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0]]) });
       if (sonarLog.length > 4000) sonarLog.shift();
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
-      if (land) paintEchoes(theta, kept, tp.prof, mR, mk, $('dirf').value === 'clean');
-      else paint(theta, prof, binM, mR, mk);
+      paint(theta, prof, binM, mR, mk);
       drawAscan(lev, kept, binM, mR, mk, +$('sens').value);
       drawFrame(theta, mR);
       nearHist.push(near); if (nearHist.length > 5) nearHist.shift();
@@ -366,7 +335,7 @@ function saveLog() {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
       settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
                   range: $('range').value, dirFilter: $('dirf').value },
-      format: 'e = [distance m, level dB, mic lag samples (+ = ahead/right), class a/s/b, angle deg (+ = right, landscape only)]; h = heading deg at click time; dl = direct-sound lag; avg = clicks averaged', frames: sonarLog }));
+      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b]; h = heading deg at click time; dl = direct-sound lag; avg = clicks averaged', frames: sonarLog }));
   } catch (e) { }
   sonarLog = [];
 }
@@ -390,18 +359,13 @@ function placeButtons() {
 }
 matchMedia('(orientation: landscape)').addEventListener('change', placeButtons);
 // Remember settings between visits (per-device convenience; falls back silently if storage is unavailable).
-const SAVED = ['range', 'rate', 'ping', 'hold', 'dirf', 'sens', 'mask', 'vol'];
+const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol'];
 try { const st = JSON.parse(localStorage.getItem('sonarSettings') || '{}'); for (const k of SAVED) if (st[k] !== undefined) $(k).value = st[k]; $('volv').textContent = $('vol').value + '%'; } catch (e) { }
 function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
 
-function applyHold() {
-  const land = $('hold').value === 'land';
-  $('howland').style.display = land ? '' : 'none'; $('howfwd').style.display = land ? 'none' : '';
-  try { Native.setOrient(land ? 'landscape' : 'reverse'); } catch (e) { try { Native.setReversed(!land); } catch (e2) { } }
-}
-$('hold').onchange = () => { clearAcc(); yaw0 = null; applyHold(); };
-placeButtons(); applyHold();   // bottom-edge forward: screen rotated 180°; landscape: screen landscape (bottom edge on the right)
+placeButtons();
+try { Native.setReversed(true); } catch (e) { }   // held bottom-edge forward: screen rotated 180 degrees
 </script>
 </body>
 </html>
