@@ -35,6 +35,9 @@
     <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="quiet">Quiet</option></select></label>
   </div>
   <div class="row">
+    <label>Direction filter <select id="dirf"><option value="on" selected>On</option><option value="off">Off</option></select></label>
+  </div>
+  <div class="row">
     <label>Sensitivity <select id="sens"><option value="-34">Low</option><option value="-38" selected>Medium</option><option value="-42">High</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
@@ -115,7 +118,7 @@ function paint(theta, prof, binM, maxR, mask) {
 }
 
 // ---------- processing ----------
-let running = false, yaw0 = null, nearHist = [];
+let running = false, yaw0 = null, nearHist = [], sonarLog = [];
 function profileFrom(x, maxR) {
   const ci = xcorr(x, PING.I), cq = xcorr(x, PING.Q), n = x.length, env = new Float64Array(n);
   for (let i = 0; i < n; i++) env[i] = Math.hypot(ci[i], cq[i]);
@@ -234,10 +237,14 @@ async function loop() {
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
-        const f = q.dir === 'ahead' ? 1 : q.dir === 'side' ? 0.45 : 0;
+        const f = $('dirf').value === 'off' ? 1 : q.dir === 'ahead' ? 1 : q.dir === 'side' ? 0.45 : 0;
         for (let dd = -1; dd <= 1; dd++) { const i = q.b + dd; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], f * tp.prof[i]); }
       }
-      const front = kept.filter(q => q.dir === 'ahead');
+      const front = $('dirf').value === 'off' ? kept : kept.filter(q => q.dir === 'ahead');
+      // log every picked echo (saved to the phone when the sonar stops) for tuning
+      sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
+        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0]]) });
+      if (sonarLog.length > 4000) sonarLog.shift();
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       paint(theta, prof, binM, mR, mk);
@@ -270,8 +277,19 @@ async function start() {
   await sleep(300);
   loop();
 }
-function stop() { running = false; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
-window.onSonarStopped = () => { running = false; $('go').textContent = 'Start sonar'; };
+function saveLog() {
+  if (!sonarLog.length) return;
+  try {
+    Native.newSession();
+    Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
+      settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
+                  range: $('range').value, dirFilter: $('dirf').value },
+      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b]; h = heading deg; dl = direct-sound lag', frames: sonarLog }));
+  } catch (e) { }
+  sonarLog = [];
+}
+function stop() { running = false; Native.sonarStop(); $('go').textContent = 'Start sonar'; saveLog(); }
+window.onSonarStopped = () => { running = false; $('go').textContent = 'Start sonar'; saveLog(); };
 $('go').onclick = () => running ? stop() : start();
 $('clear').onclick = () => { clearAcc(); yaw0 = null; };
 $('back').onclick = () => { stop(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
