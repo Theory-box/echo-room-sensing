@@ -245,3 +245,16 @@ tape measure before orientation in the sparse-room test.
   lazy-Susan voice prompt. No inputs to fill in.
 - Realistic ceiling of this approach: a plain rectangle (dimensions within a few cm, orientation within a few degrees),
   ~55–65% odds in the living room after another round or two of fixes; furniture unlikely.
+
+## 15. Live sonar radar (app)
+- "Sonar radar (live)" screen (`android/app/src/main/assets/sonar.html` + native ping loop in `MainActivity`):
+  looping static AudioTrack ping (R/bottom speaker) every 3200 samples (15/s), continuous UNPROCESSED stereo recording
+  into a 2 s ring buffer, JS reads the latest 4 periods, averages 3 pings, matched filter, direct path = time zero.
+- Display: radar circle painted along the gyro heading (±10° wedge, ~3 s fade), nearest-echo readout + bar.
+  Settings: ping (Strong 2–12 kHz audible / Quiet 16–22 kHz), sensitivity (−34/−38/−42 dB re direct, 1/r-compensated),
+  range 3/5/7 m, hide-closer-than 0.3/0.5/0.8 m. Volume held at 80% while running; stops on app pause.
+- Lessons from the on-device check: the near-ultrasonic ping was ~−51 dBFS at the mic (speaker weak above 16 kHz), so
+  "Strong" (2–12 kHz, +34 dB) is the default; r² gain was wrong for amplitude (now 1/r); "smart" detection hid echoes in
+  clutter, so it's a plain threshold like a real sonar. WebView needed a WebViewClient for in-app navigation.
+- Verified on device: runs ~12–20 ms/frame, paints echoes, nearest-echo readings 1.4–2.4 m by a desk. Not yet judged by
+  the user in real use.

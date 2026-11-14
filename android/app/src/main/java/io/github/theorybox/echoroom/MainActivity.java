@@ -66,6 +66,117 @@ public class MainActivity extends Activity implements SensorEventListener {
     private volatile float gyroMag = 0f;
     private final float[] gravity = new float[3];
     private volatile String sessionDir = null;
+
+    // ---------- live sonar: looping ping playback + continuous stereo recording into a ring buffer ----------
+    private volatile boolean sonarOn = false;
+    private AudioTrack sonarTrack;
+    private Thread sonarThread;
+    private float[] ring;                 // interleaved stereo
+    private long ringFrames = 0;          // total frames written
+    private int ringCap = 0;              // capacity in frames
+    private final Object ringLock = new Object();
+
+    private String startSonar(String pingB64, int periodFrames, int sr) {
+        stopSonar();
+        try {
+            byte[] pb = Base64.decode(pingB64, Base64.DEFAULT);
+            FloatBuffer fb = ByteBuffer.wrap(pb).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            float[] ping = new float[fb.remaining()];
+            fb.get(ping);
+            float[] stereo = new float[periodFrames * 2];
+            for (int i = 0; i < ping.length && i < periodFrames; i++) stereo[2 * i + 1] = ping[i];   // R = bottom speaker
+            AudioManager am = getSystemService(AudioManager.class);
+            int mx = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(mx * 0.8f), 0);
+            sonarTrack = new AudioTrack.Builder()
+                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                            .setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(stereo.length * 4)
+                    .build();
+            sonarTrack.write(stereo, 0, stereo.length, AudioTrack.WRITE_BLOCKING);
+            sonarTrack.setLoopPoints(0, periodFrames, -1);
+            final AudioRecord rec = new AudioRecord.Builder()
+                    .setAudioSource(MediaRecorder.AudioSource.UNPROCESSED)
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                            .setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build())
+                    .setBufferSizeInBytes(sr * 2 * 4)
+                    .build();
+            if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
+            synchronized (ringLock) {
+                ringCap = sr * 2;
+                ring = new float[ringCap * 2];
+                ringFrames = 0;
+            }
+            sonarOn = true;
+            rec.startRecording();
+            sonarTrack.play();
+            sonarThread = new Thread(() -> {
+                float[] buf = new float[1024 * 2];
+                long lastVol = 0;
+                try {
+                    while (sonarOn) {
+                        long now = System.currentTimeMillis();
+                        if (now - lastVol > 500) {          // hold media volume at 80% while the radar runs
+                            lastVol = now;
+                            AudioManager amv = getSystemService(AudioManager.class);
+                            int target = Math.round(amv.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.8f);
+                            if (amv.getStreamVolume(AudioManager.STREAM_MUSIC) != target)
+                                amv.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
+                        }
+                        int n = rec.read(buf, 0, buf.length, AudioRecord.READ_BLOCKING);
+                        if (n <= 0) continue;
+                        synchronized (ringLock) {
+                            int frames = n / 2;
+                            for (int f = 0; f < frames; f++) {
+                                int pos = (int) ((ringFrames + f) % ringCap);
+                                ring[2 * pos] = buf[2 * f];
+                                ring[2 * pos + 1] = buf[2 * f + 1];
+                            }
+                            ringFrames += frames;
+                        }
+                    }
+                } finally {
+                    rec.stop();
+                    rec.release();
+                }
+            }, "sonar-record");
+            sonarThread.start();
+            return "ok";
+        } catch (Throwable t) {
+            Log.e(TAG, "sonar start failed", t);
+            stopSonar();
+            return "error: " + t;
+        }
+    }
+
+    private void stopSonar() {
+        sonarOn = false;
+        if (sonarThread != null) {
+            try { sonarThread.join(500); } catch (InterruptedException ignored) { }
+            sonarThread = null;
+        }
+        if (sonarTrack != null) {
+            try { sonarTrack.stop(); } catch (Throwable ignored) { }
+            sonarTrack.release();
+            sonarTrack = null;
+        }
+    }
+
+    /** Latest `frames` samples of one channel (0 = bottom mic, 1 = back mic) as base64 float32, prefixed "totalFrames|". */
+    private String getSonar(int frames, int ch) {
+        synchronized (ringLock) {
+            if (ring == null || ringFrames < frames) return "0|";
+            float[] out = new float[frames];
+            long start = ringFrames - frames;
+            for (int i = 0; i < frames; i++) out[i] = ring[2 * (int) ((start + i) % ringCap) + ch];
+            ByteBuffer bb = ByteBuffer.allocate(frames * 4).order(ByteOrder.LITTLE_ENDIAN);
+            bb.asFloatBuffer().put(out);
+            return ringFrames + "|" + Base64.encodeToString(bb.array(), Base64.NO_WRAP);
+        }
+    }
     private volatile String extrasJson = "{}";
     private volatile String state = "idle";
     private volatile float progress = 0f;
@@ -89,6 +200,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 return true;
             }
         });
+        web.setWebViewClient(new android.webkit.WebViewClient());   // keep page navigation (e.g. sonar.html) inside the app
         web.addJavascriptInterface(new Bridge(), "Native");
         setContentView(web);
         readExtras(getIntent());
@@ -117,6 +229,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onPause() {
         super.onPause();
         sm.unregisterListener(this);
+        stopSonar();   // never keep pinging in the background
+        if (web != null) web.evaluateJavascript("window.onSonarStopped && onSonarStopped()", null);
     }
 
     @Override
@@ -412,6 +526,15 @@ public class MainActivity extends Activity implements SensorEventListener {
             tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 300);
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(tg::release, 500);
         }
+
+        @JavascriptInterface public String sonarStart(String pingB64, int periodFrames, int sr) {
+            if (!hasMicPermission()) return "no mic permission";
+            return startSonar(pingB64, periodFrames, sr);
+        }
+
+        @JavascriptInterface public void sonarStop() { stopSonar(); }
+
+        @JavascriptInterface public String sonarRead(int frames, int ch) { return getSonar(frames, ch); }
 
         @JavascriptInterface public String newSession() {
             String name = "sweep-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new java.util.Date());
