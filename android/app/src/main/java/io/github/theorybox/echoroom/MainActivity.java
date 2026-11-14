@@ -89,6 +89,18 @@ public class MainActivity extends Activity implements SensorEventListener {
             float[] stereo = new float[periodFrames * 2];
             for (int i = 0; i < ping.length && i < periodFrames; i++) stereo[2 * i + 1] = ping[i];   // R = bottom speaker
             AudioManager am = getSystemService(AudioManager.class);
+            // Safety: never click into headphones / Bluetooth (80% media volume into someone's ears), and the timing
+            // model assumes the bottom speaker. Refuse to start while such an output is connected.
+            AudioDeviceInfo speaker = null;
+            for (AudioDeviceInfo dev : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int t = dev.getType();
+                if (t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
+                        || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                        || t == AudioDeviceInfo.TYPE_USB_HEADSET)
+                    return "error: headphones or Bluetooth audio connected - disconnect them to use the sonar";
+                if (t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = dev;
+            }
             int mx = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             if (savedVolume < 0) savedVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
             am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(mx * 0.8f), 0);
@@ -102,6 +114,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     .build();
             sonarTrack.write(stereo, 0, stereo.length, AudioTrack.WRITE_BLOCKING);
             sonarTrack.setLoopPoints(0, periodFrames, -1);
+            if (speaker != null) sonarTrack.setPreferredDevice(speaker);
             final AudioRecord rec = new AudioRecord.Builder()
                     .setAudioSource(MediaRecorder.AudioSource.UNPROCESSED)
                     .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT)

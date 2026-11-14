@@ -43,13 +43,13 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quiet">Quiet</option><option value="quietlong" selected>Quiet (long) – inaudible</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
   </div>
   <div class="row">
-    <label>Sensitivity <select id="sens"><option value="auto" selected>Auto</option><option value="adaptive">Adaptive (all)</option><option value="-34">Low</option><option value="-38">Medium</option><option value="-42">High</option></select></label>
+    <label>Sensitivity <select id="sens"></select></label>
     <label>Hide closer than <select id="mask"><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
   <p class="mut" id="howfwd">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
@@ -120,8 +120,10 @@ function drawFrame(theta, maxR) {
 }
 
 // Paint one ping's range profile (values 0..1 per bin) along heading theta (deg, clockwise from start).
+let lastPaintT = 0;
 function paint(theta, prof, binM, maxR, mask) {
-  actx.fillStyle = 'rgba(0,0,0,0.05)'; actx.fillRect(0, 0, W, W);            // fade (~2 s)
+  const now = performance.now(), dt = lastPaintT ? Math.min(2, (now - lastPaintT) / 1000) : 0.1; lastPaintT = now;
+  actx.fillStyle = `rgba(0,0,0,${(1 - Math.exp(-dt / 1.5)).toFixed(3)})`; actx.fillRect(0, 0, W, W);   // fade ~1.5 s, any click rate
   const half = 10 * Math.PI / 180, a = (theta - 90) * Math.PI / 180;        // ±10° wedge: direction is rough
   const step = RPX * binM / maxR;
   for (let i = 0; i < prof.length; i++) {
@@ -151,20 +153,20 @@ function yawAt(t) {   // interpolated azimuth at time t (ms)
 }
 function gyroMax(ms) { let m = 0; const t = performance.now() - ms; for (const h of yawHist) if (h.t >= t) m = Math.max(m, h.g); return m; }
 function pct(a, p) { const b = Float64Array.from(a).sort(); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; }
+// x = [y, y] where y is ONE click period averaged over all recorded periods (the clicks repeat exactly), so the
+// correlation is circular: every index 0..P uses the complete click template, whatever its length.
 function profileFrom(x, maxR) {
   const ci = xcorr(x, PING.I), cq = xcorr(x, PING.Q), n = x.length, env = new Float64Array(n);
   for (let i = 0; i < n; i++) env[i] = Math.hypot(ci[i], cq[i]);
-  const nb = Math.min(PERIOD - 1, Math.round(2 * maxR / C * SR));
-  // direct path = strongest peak in the first period; use the next click instead if its echo window still fits
-  // (newer data -> less lag between the audio and the heading it is drawn at)
-  let d = argmax(env, 0, PERIOD);
-  if (d + PERIOD + nb + 50 < n && env[d + PERIOD] > 0.5 * env[d]) d += PERIOD;
+  const T = PING.I.length;
+  const nb = Math.max(10, Math.min(PERIOD - T - 1, Math.round(2 * maxR / C * SR)));
+  const d = argmax(env, 0, PERIOD);                       // direct sound of the (averaged) click
   const raw = env.subarray(d, d + nb);
   const peak = env[d] + 1e-12;
-  // noise floor: lower percentile of the tail beyond max range (the median was pushed up by late reverb)
-  const tail = env.subarray(d + nb, Math.min(n, d + PERIOD) - 50);
+  // noise floor: lower percentile of the stretch beyond max range, stopping before the next click's direct sound
+  const tail = env.subarray(d + nb, d + PERIOD - T);
   const noise = (tail.length > 50 ? pct(tail, 0.3) : pct(raw, 0.3)) / peak + 1e-9;
-  return { raw, peak, noise, d, env };
+  return { raw, peak, noise, d, env, nb, T };
 }
 
 // Echo picking: level re direct sound with mild 1/r compensation; keep only the strongest few local peaks that
@@ -279,17 +281,21 @@ function frame(binM, binS, t0) {
     }
     lastFrames = frames; staleSince = 0;
     if (s.length > k + 1) {
-      const xr = b64ToF32(s.slice(k + 1)), x = new Float32Array(2 * PERIOD), x2 = new Float32Array(2 * PERIOD);
-      for (let i = 0; i < 2 * PERIOD; i++) {
-        let a = 0, b = 0; for (let j = 0; j < avg; j++) { const ii = i + j * PERIOD; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
-        x[i] = a / avg; x2[i] = b / avg;
+      const xr = b64ToF32(s.slice(k + 1)), np = avg + 1;
+      // fold all np recorded periods into one averaged period, then repeat it twice (circular correlation)
+      const x = new Float32Array(2 * PERIOD), x2 = new Float32Array(2 * PERIOD);
+      for (let i = 0; i < PERIOD; i++) {
+        let a = 0, b = 0; for (let j = 0; j < np; j++) { const ii = i + j * PERIOD; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
+        x[i] = x[i + PERIOD] = a / np; x2[i] = x2[i + PERIOD] = b / np;
       }
-      const { raw, peak, noise, d, env } = profileFrom(x, +$('range').value);
-      if (peak < 1e-6) return;   // no click in the window yet (just started)
+      const { raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value);
       const env2 = envOf(x2), raw2 = env2.subarray(d, d + raw.length);
+      // back-mic noise level, to tell whether the back mic actually heard an echo
+      const noise2 = pct(env2.subarray(d + nb, d + PERIOD - T), 0.3) + 1e-12;
       const o = JSON.parse(Native.orientation());
-      // when the analysed clicks were recorded: middle of the averaged clicks, counted back from the buffer end
-      const clickIdx = d + (avg - 1) * PERIOD / 2;
+      // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
+      // plus half the sweep length (centre of the sweep), counted back from the buffer end
+      const clickIdx = d + avg * PERIOD / 2 + T / 2;
       const ageMs = (L - clickIdx) / SR * 1000 + 40;             // + ~40 ms recording latency
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
@@ -303,7 +309,9 @@ function frame(binM, binS, t0) {
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
         q.lag = micLag(raw, raw2, i0);
         q.cos = Math.max(-1, Math.min(1, q.lag / MIC_LAG));
-        q.dir = classify(q.cos);
+        let p2 = 0; for (let i = Math.max(0, i0 - 26); i < Math.min(raw2.length, i0 + 27); i++) p2 = Math.max(p2, raw2[i]);
+        q.heard2 = p2 / noise2;                                   // back-mic echo strength over its own noise
+        q.dir = q.heard2 >= 3.2 ? classify(q.cos) : 'side';       // < ~10 dB: direction unknown -> unsure
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
@@ -314,16 +322,18 @@ function frame(binM, binS, t0) {
       const front = kept.filter(q => q.dir === 'ahead');   // distance readout: confirmed-ahead echoes only
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
-        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0]]) });
+        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2)).toFixed(1)]) });
       if (sonarLog.length > 4000) sonarLog.shift();
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       paint(theta, prof, binM, mR, mk);
       drawAscan(lev, kept, binM, mR, mk, lastThr);
       drawFrame(theta, mR);
-      nearHist.push(near); if (nearHist.length > 5) nearHist.shift();
-      const vals = nearHist.filter(v => v !== null).sort((a, b) => a - b);
-      const nd = vals.length >= 3 ? vals[vals.length >> 1] : null;
+      // smooth over the last ~1.2 s (at least 3 clicks), not a fixed number of frames
+      const winMs = Math.max(1200, 3 * PERIOD / SR * 1000);
+      nearHist.push({ t: t0, v: near }); while (nearHist.length && t0 - nearHist[0].t > winMs) nearHist.shift();
+      const vals = nearHist.map(h => h.v).filter(v => v !== null).sort((a, b) => a - b);
+      const nd = vals.length >= Math.min(2, nearHist.length) && vals.length ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       $('status').textContent = `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`;
@@ -341,7 +351,7 @@ async function start() {
   const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
   for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
-  if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; return; }
+  if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; try { Native.sonarRestoreVolume(); } catch (e) { } return; }
   running = true; yaw0 = null; nearHist = []; lastFrames = -1; staleSince = 0; clearAcc();
   const gen = ++loopGen;          // any older loop sees a different generation and exits
   $('go').textContent = 'Stop';
@@ -355,19 +365,21 @@ function saveLog() {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
       settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
                   range: $('range').value, dirFilter: $('dirf').value },
-      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b]; h = heading deg at click time; dl = direct-sound lag; avg = clicks averaged', frames: sonarLog }));
+      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b, back-mic echo dB over its noise]; h = heading deg at click time; dl = direct-sound lag; avg = extra clicks folded', frames: sonarLog }));
   } catch (e) { }
   sonarLog = [];
 }
-function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; saveLog(); }
-// user-initiated stop (button / Back): also hand the media volume back; restarts for setting changes keep it
-function stopByUser() { stop(); try { Native.sonarRestoreVolume(); } catch (e) { } }
+function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
+// user-initiated stop (button / Back): also hand the media volume back and save the log; restarts for setting
+// changes keep both going
+function stopByUser() { stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
 window.onSonarStopped = () => { running = false; loopGen++; $('go').textContent = 'Start sonar'; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start();
 $('clear').onclick = () => { clearAcc(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = $('mask').onchange = $('sens').onchange = () => clearAcc();
-$('ping').onchange = $('rate').onchange = () => { if (running) { stop(); start(); } };
+$('ping').onchange = () => { buildSens($('sens').value); saveSettings(); if (running) { stop(); start(); } };
+$('rate').onchange = () => { if (running) { stop(); start(); } };
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(); } };
 drawFrame(null, 5);
@@ -379,8 +391,26 @@ function placeButtons() {
 }
 matchMedia('(orientation: landscape)').addEventListener('change', placeButtons);
 // Remember settings between visits (per-device convenience; falls back silently if storage is unavailable).
+// Sensitivity choices depend on the ping: Quiet (long) uses an adaptive threshold (Low/Med/High shift it);
+// Strong/Mid use the fixed thresholds you tested, with "Adaptive (test)" to force the adaptive one.
+function buildSens(keep) {
+  const quiet = /^quiet/.test($('ping').value), sel = $('sens');
+  const opts = quiet ? [['auto', 'Auto'], ['-34', 'Low'], ['-38', 'Medium'], ['-42', 'High']]
+                     : [['-38', 'Medium'], ['-34', 'Low'], ['-42', 'High'], ['adaptive', 'Adaptive (test)']];
+  sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  sel.value = opts.some(o => o[0] === keep) ? keep : opts[0][0];
+}
 const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol'];
-try { const st = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); for (const k of SAVED) if (st[k] !== undefined) $(k).value = st[k]; $('volv').textContent = $('vol').value + '%'; } catch (e) { }
+let savedSt = {};
+try { savedSt = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); } catch (e) { }
+for (const k of SAVED) {
+  if (savedSt[k] === undefined || k === 'sens') continue;
+  $(k).value = savedSt[k];
+  if ($(k).tagName === 'SELECT' && $(k).selectedIndex < 0)   // stale saved value (option removed): use the default
+    $(k).value = [...$(k).options].find(o => o.defaultSelected)?.value || $(k).options[0].value;
+}
+buildSens(savedSt.sens);
+$('volv').textContent = $('vol').value + '%';
 function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings2', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
 
