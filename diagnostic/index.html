@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Echo Diagnostic</title>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --mut:#666; --acc:#2b6cb0; --card:#fff; --bd:#ddd; }
+  @media (prefers-color-scheme: dark){ :root{ --fg:#eee; --bg:#121212; --mut:#999; --acc:#63a4ff; --card:#1d1d1d; --bd:#333; } }
+  body{ font:16px/1.45 system-ui,sans-serif; margin:0; padding:16px; background:var(--bg); color:var(--fg); max-width:720px; margin-inline:auto; }
+  h1{ font-size:1.4em; margin:.2em 0 .4em; }
+  .card{ background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:12px 14px; margin:12px 0; }
+  ol{ padding-left:1.2em; margin:.3em 0; } li{ margin:.2em 0; }
+  button{ font:inherit; font-weight:600; padding:14px 18px; border-radius:10px; border:0; background:var(--acc); color:#fff; width:100%; margin:6px 0; }
+  button:disabled{ opacity:.45; }
+  #status{ font-weight:600; min-height:1.4em; }
+  .bar{ height:8px; background:var(--bd); border-radius:4px; overflow:hidden; } .bar>div{ height:100%; width:0; background:var(--acc); transition:width .2s; }
+  canvas{ width:100%; height:180px; display:block; background:var(--bg); border-radius:8px; margin-top:6px; }
+  textarea{ width:100%; height:240px; font:12px/1.35 ui-monospace,monospace; box-sizing:border-box; background:var(--bg); color:var(--fg); border:1px solid var(--bd); border-radius:8px; }
+  .row{ display:flex; gap:8px; } .row button{ flex:1; background:#555; }
+  .row button.sel{ background:var(--acc); }
+  .mut{ color:var(--mut); font-size:.9em; }
+  .ok{ color:#2f9e44; } .warn{ color:#e8a400; } .bad{ color:#e03131; }
+</style>
+</head>
+<body>
+<h1>Echo Diagnostic</h1>
+<div class="card">
+  <b>Before you start</b>
+  <ol>
+    <li>Media volume about 80% (not 100%). No headphones or Bluetooth audio.</li>
+    <li>Quiet room. Phone <b>flat on a table, screen up</b>, ideally on a folded towel. Nothing covering the top or bottom edges.</li>
+    <li>Tap <b>Run</b>, allow the microphone, then step back and stay quiet for about 15 seconds. You'll hear a whoosh, some chirps, then faint high ticks.</li>
+  </ol>
+</div>
+<button id="run">Run</button>
+<div id="status" class="mut"></div>
+<div class="bar"><div id="prog"></div></div>
+
+<div class="card" id="askcard" style="display:none">
+  <b>One question:</b> during the last part, did you hear faint high-pitched ticks?
+  <div class="row"><button data-h="yes">Yes</button><button data-h="faint">Faint</button><button data-h="no">No</button></div>
+</div>
+
+<div class="card" id="resultscard" style="display:none">
+  <div id="verdicts"></div>
+  <div class="mut">Frequency response (blue = mic 1, orange = mic 2)</div>
+  <canvas id="frc"></canvas>
+  <div class="mut">Ultrasonic echo profile, mic 1 (distance in meters)</div>
+  <canvas id="usc"></canvas>
+  <button id="copy">Copy results</button>
+  <div id="copymsg" class="mut"></div>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script>
+"use strict";
+// ---------- DSP core (pure functions) ----------
+function fft(re, im, inv){
+  const n = re.length;
+  for (let i=1,j=0;i<n;i++){ let bit=n>>1; for(;j&bit;bit>>=1) j^=bit; j^=bit;
+    if(i<j){ let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; } }
+  for (let len=2; len<=n; len<<=1){
+    const ang = 2*Math.PI/len*(inv?1:-1), half=len>>1;
+    const wr=Math.cos(ang), wi=Math.sin(ang);
+    for (let i=0;i<n;i+=len){ let cr=1, ci=0;
+      for (let j=0;j<half;j++){ const a=i+j, b=a+half;
+        const xr=re[b]*cr-im[b]*ci, xi=re[b]*ci+im[b]*cr;
+        re[b]=re[a]-xr; im[b]=im[a]-xi; re[a]+=xr; im[a]+=xi;
+        const t=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=t; } } }
+  if (inv) for (let i=0;i<n;i++){ re[i]/=n; im[i]/=n; }
+}
+// corr[k] = sum_n x[n+k]*t[n], k = 0..x.length-1
+function xcorr(x, t){
+  let N=1; while (N < x.length + t.length) N<<=1;
+  const ar=new Float64Array(N), ai=new Float64Array(N), br=new Float64Array(N), bi=new Float64Array(N);
+  ar.set(x); br.set(t); fft(ar,ai,false); fft(br,bi,false);
+  for (let i=0;i<N;i++){ const r=ar[i]*br[i]+ai[i]*bi[i], m=ai[i]*br[i]-ar[i]*bi[i]; ar[i]=r; ai[i]=m; }
+  fft(ar,ai,true);
+  return ar.slice(0, x.length);
+}
+function rms(a, s=0, e=a.length){ let q=0; s=Math.max(0,s); e=Math.min(a.length,e); for(let i=s;i<e;i++) q+=a[i]*a[i]; return Math.sqrt(q/Math.max(1,e-s)); }
+const db = v => 20*Math.log10(Math.max(v,1e-12));
+function median(a){ const b=Array.from(a).sort((x,y)=>x-y); return b[b.length>>1]; }
+function parabolic(a,i){ if(i<=0||i>=a.length-1) return i; const y0=a[i-1],y1=a[i],y2=a[i+1], d=y0-2*y1+y2; return d===0?i:i+0.5*(y0-y2)/d; }
+function argmax(a,s=0,e=a.length){ let bi=s, bv=-Infinity; for(let i=s;i<e;i++) if(a[i]>bv){bv=a[i];bi=i;} return bi; }
+
+// Signal generators. Returns {I,Q} with window w.
+function linChirp(sr, f0, f1, T, taper){
+  const n=Math.round(T*sr), I=new Float32Array(n), Q=new Float32Array(n);
+  for(let i=0;i<n;i++){ const t=i/sr, ph=2*Math.PI*(f0*t+(f1-f0)*t*t/(2*T));
+    let w; if(taper==='hann') w=0.5-0.5*Math.cos(2*Math.PI*i/(n-1));
+    else { const r=0.1*n; w = i<r ? 0.5-0.5*Math.cos(Math.PI*i/r) : i>n-1-r ? 0.5-0.5*Math.cos(Math.PI*(n-1-i)/r) : 1; }
+    I[i]=w*Math.cos(ph); Q[i]=w*Math.sin(ph); }
+  return {I,Q};
+}
+function logSweepPhase(t, f1, f2, T){ const K=Math.log(f2/f1); return 2*Math.PI*f1*T/K*(Math.exp(t*K/T)-1); }
+function logSweep(sr, f1, f2, T){
+  const n=Math.round(T*sr), s=new Float32Array(n), fade=Math.round(0.01*sr);
+  for(let i=0;i<n;i++){ let w=1; if(i<fade) w=0.5-0.5*Math.cos(Math.PI*i/fade); else if(i>n-1-fade) w=0.5-0.5*Math.cos(Math.PI*(n-1-i)/fade);
+    s[i]=w*Math.sin(logSweepPhase(i/sr,f1,f2,T)); }
+  return s;
+}
+
+// Test plan (times in seconds from buffer start)
+function makePlan(sr){
+  const S = x=>Math.round(x*sr);
+  const P = { sr, A:0.4, total:S(12.0),
+    sweep:{ start:S(1.0), f1:50, f2:23500, T:3.0 },
+    chirpA:{ f0:1000, f1:18000, T:0.06, L:[0,1,2,3].map(k=>S(4.5)+k*S(0.3)), R:[0,1,2,3].map(k=>S(6.0)+k*S(0.3)) },
+    us:{ f0:18000, f1:22000, T:0.04, starts:Array.from({length:16},(_,k)=>S(7.5)+k*S(0.25)) } };
+  P.sweepSig = logSweep(sr, P.sweep.f1, P.sweep.f2, P.sweep.T);
+  P.chirpSig = linChirp(sr, P.chirpA.f0, P.chirpA.f1, P.chirpA.T, 'tukey');
+  P.usSig = linChirp(sr, P.us.f0, P.us.f1, P.us.T, 'hann');
+  return P;
+}
+function buildPlayback(P){
+  const L=new Float32Array(P.total), R=new Float32Array(P.total);
+  const put=(dst,sig,at)=>{ for(let i=0;i<sig.length&&at+i<dst.length;i++) dst[at+i]+=P.A*sig[i]; };
+  put(L,P.sweepSig,P.sweep.start); put(R,P.sweepSig,P.sweep.start);
+  P.chirpA.L.forEach(s=>put(L,P.chirpSig.I,s));
+  P.chirpA.R.forEach(s=>put(R,P.chirpSig.I,s));
+  P.us.starts.forEach(s=>{ put(L,P.usSig.I,s); put(R,P.usSig.I,s); });
+  return {L,R};
+}
+
+// Coherent-average segments then I/Q matched filter -> envelope
+function profile(ch, starts, offset, sig, pre, winLen){
+  const avg=new Float64Array(winLen); let cnt=0;
+  for(const s of starts){ const b=offset+s-pre; if(b<0||b+winLen>ch.length) continue; for(let i=0;i<winLen;i++) avg[i]+=ch[b+i]; cnt++; }
+  if(!cnt) return null;
+  for(let i=0;i<winLen;i++) avg[i]/=cnt;
+  const ci=xcorr(avg,sig.I), cq=xcorr(avg,sig.Q), env=new Float64Array(winLen);
+  for(let i=0;i<winLen;i++) env[i]=Math.hypot(ci[i],cq[i]);
+  return env;
+}
+function echoes(env, sr, p0, noise, maxN=6){
+  const out=[], skip=Math.round(0.0015*sr), k=5, floor=env[Math.round(p0)]*0.0056; // -45 dB
+  for(let i=Math.round(p0)+skip;i<env.length-k;i++){
+    let pk=true; for(let j=1;j<=k;j++) if(env[i]<env[i-j]||env[i]<env[i+j]){pk=false;break;}
+    if(pk && env[i]>4*noise && env[i]>floor) out.push(i);
+  }
+  out.sort((a,b)=>env[b]-env[a]);
+  return out.slice(0,maxN).sort((a,b)=>a-b).map(i=>({ m:+((i-p0)/sr*343/2).toFixed(3), dB:+db(env[i]/env[Math.round(p0)]).toFixed(1) }));
+}
+
+function analyze(ch0, ch1, P){
+  const sr=P.sr, R={};
+  const S = x=>Math.round(x*sr);
+  const mix = ch0.map((v,i)=>v+(ch1?ch1[i]:0));
+  // 1. alignment via sweep
+  const seg = mix.subarray ? mix.subarray(0, Math.min(mix.length, S(6.5))) : mix.slice(0,S(6.5));
+  const c = xcorr(seg, P.sweepSig);
+  const ca = c.map(Math.abs), p = argmax(ca);
+  const offset = p - P.sweep.start;
+  R.offsetSamples = offset; R.alignConf = +(ca[p]/(median(ca)+1e-12)).toFixed(1);
+  // 2. levels
+  const nb = offset + S(0.1), ne = offset + S(0.9);
+  const chans = ch1 ? [ch0,ch1] : [ch0];
+  R.noiseFloor_dBFS = chans.map(ch=>+db(rms(ch,nb,ne)).toFixed(1));
+  R.clippedSamples = chans.map(ch=>{ let n=0; for(const v of ch) if(Math.abs(v)>0.99) n++; return n; });
+  // 3. channel identity during sweep
+  const sb=offset+P.sweep.start, se=sb+S(P.sweep.T);
+  if(ch1){
+    // use the left-speaker-only chirp section: asymmetric, so two real mics must differ
+    const cb=offset+P.chirpA.L[0], ce=offset+P.chirpA.L[3]+S(0.25);
+    const r0=rms(ch0,cb,ce), r1=rms(ch1,cb,ce); let dot=0,d2=0;
+    for(let i=cb;i<ce;i++){ dot+=ch0[i]*ch1[i]; d2+=(ch0[i]-ch1[i])**2; }
+    const n=ce-cb, corr=dot/n/(r0*r1+1e-20), diff=Math.sqrt(d2/n)/(r0+1e-20);
+    R.chanCorr=+corr.toFixed(5); R.chanDiffRatio=+diff.toFixed(4); R.ch1rel_dB=+db(r1/(r0+1e-20)).toFixed(1);
+    R.channels = r1 < 1e-5 ? 'MONO (ch2 silent)' : (corr>0.9999 && diff<0.01) ? 'DUPLICATE (same mic twice)' : 'DISTINCT';
+  } else R.channels='MONO (1 channel)';
+  // 4. frequency response via demodulation at instantaneous sweep phase
+  const freqs=[100,200,300,500,1000,2000,4000,8000,12000,16000,17000,18000,19000,20000,21000,22000,23000];
+  const {f1,f2,T}=P.sweep, K=Math.log(f2/f1), W=S(0.02);
+  R.freqResp_dB = {};
+  for(const f of freqs){
+    const tf=T*Math.log(f/f1)/K, nc=sb+Math.round(tf*sr);
+    const vals = chans.map(ch=>{ let re=0,im=0,cnt=0;
+      for(let n=Math.max(sb,nc-(W>>1)); n<Math.min(se,nc+(W>>1)); n++){ const ph=logSweepPhase((n-sb)/sr,f1,f2,T); re+=ch[n]*Math.cos(ph); im-=ch[n]*Math.sin(ph); cnt++; }
+      return +db(2*Math.hypot(re,im)/Math.max(cnt,1)/P.A).toFixed(1); });
+    R.freqResp_dB[f]=vals;
+  }
+  // 5. speaker x mic direct-path delays (audible chirp)
+  const pre=S(0.002), win=S(0.12);
+  R.delays={}; R.audibleEchoes={};
+  for(const spk of ['L','R']){
+    R.delays[spk]=chans.map((ch,mi)=>{
+      const env=profile(ch, P.chirpA[spk], offset, P.chirpSig, pre, win); if(!env) return null;
+      const pi=argmax(env,0,S(0.02)), pf=parabolic(env,pi);
+      if(spk==='L'){ const nz=median(env.subarray(Math.round(win*0.75))); R.audibleEchoes['mic'+(mi+1)]=echoes(env,sr,pf,nz); }
+      return +(pf-pre).toFixed(2);
+    });
+  }
+  if(ch1 && R.delays.L[1]!=null && R.delays.R[1]!=null){
+    const dL=R.delays.L[0]-R.delays.L[1], dR=R.delays.R[0]-R.delays.R[1];
+    R.micTimeDiff_L_us=+(dL/sr*1e6).toFixed(1); R.micTimeDiff_R_us=+(dR/sr*1e6).toFixed(1);
+    R.geometrySwing_samples=+(dL-dR).toFixed(2);
+    R.geometrySwing_cm=+((dL-dR)/sr*34300).toFixed(1);
+  }
+  // 6. ultrasonic
+  const upre=S(0.002), uwin=S(0.2);
+  R.ultrasonic=chans.map(ch=>{
+    const env=profile(ch, P.us.starts, offset, P.usSig, upre, uwin); if(!env) return null;
+    const pi=argmax(env,0,S(0.02)), pf=parabolic(env,pi), nz=median(env.subarray(Math.round(uwin*0.75)));
+    return { snr_dB:+db(env[pi]/(nz+1e-20)).toFixed(1), echoes:echoes(env,sr,pf,nz), _env:env, _p0:pf };
+  });
+  return R;
+}
+
+// ---------- Browser side ----------
+if (typeof window !== 'undefined') {
+const $=id=>document.getElementById(id);
+let heard='not answered', lastReport=null;
+const setStatus=(s,p)=>{ $('status').textContent=s; if(p!=null) $('prog').style.width=(p*100)+'%'; };
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+function sensorTest(ms){
+  return new Promise(res=>{
+    const o={ secureContext:window.isSecureContext, motionEvents:0, orientEvents:0 }; let last=null, ints=[];
+    const m=e=>{ o.motionEvents++; const t=performance.now(); if(last) ints.push(t-last); last=t;
+      const g=e.accelerationIncludingGravity, r=e.rotationRate;
+      if(g) o.gravity=[g.x,g.y,g.z].map(v=>v==null?null:+v.toFixed(2));
+      if(r) o.rotationRate=[r.alpha,r.beta,r.gamma].map(v=>v==null?null:+v.toFixed(3)); };
+    const or=e=>{ o.orientEvents++; o.orientation=[e.alpha,e.beta,e.gamma].map(v=>v==null?null:+v.toFixed(1)); };
+    addEventListener('devicemotion',m); addEventListener('deviceorientation',or);
+    let gyro=null, gn=0;
+    try{ if('Gyroscope' in window){ gyro=new Gyroscope({frequency:200}); gyro.onreading=()=>gn++; gyro.onerror=e=>o.gyroError=e.error&&e.error.name; gyro.start(); } else o.gyroError='Gyroscope API absent'; }catch(e){ o.gyroError=String(e); }
+    setTimeout(()=>{ removeEventListener('devicemotion',m); removeEventListener('deviceorientation',or);
+      if(gyro){ try{gyro.stop();}catch(e){} o.gyroApiHz=+(gn/(ms/1000)).toFixed(1); }
+      if(ints.length) o.motionHz=+(1000/(ints.reduce((a,b)=>a+b,0)/ints.length)).toFixed(1);
+      res(o); }, ms);
+  });
+}
+
+async function run(){
+  $('run').disabled=true; $('resultscard').style.display='none';
+  const report={ version:'echo-diag v1', time:new Date().toISOString(), ua:navigator.userAgent };
+  try{
+    setStatus('Checking motion sensors (keep the phone still)...',0.02);
+    report.sensors = await sensorTest(2000);
+
+    setStatus('Opening microphone...',0.12);
+    const ctx=new (window.AudioContext||window.webkitAudioContext)({ sampleRate:48000, latencyHint:'interactive' });
+    await ctx.resume();
+    report.sampleRate=ctx.sampleRate; report.baseLatency=ctx.baseLatency; report.outputLatency=ctx.outputLatency;
+    let stream;
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:{ideal:2}, sampleRate:{ideal:48000} } });
+    }catch(e){ report.micError=String(e); throw new Error('Microphone blocked: '+e.message); }
+    const tr=stream.getAudioTracks()[0];
+    report.trackLabel=tr.label; report.trackSettings=tr.getSettings();
+    try{ report.trackCapabilities=tr.getCapabilities(); }catch(e){}
+    try{ const d=await navigator.mediaDevices.enumerateDevices(); report.audioInputs=d.filter(x=>x.kind==='audioinput').map(x=>x.label||'(unlabeled)'); report.audioOutputs=d.filter(x=>x.kind==='audiooutput').map(x=>x.label||'(unlabeled)'); }catch(e){}
+
+    const P=makePlan(ctx.sampleRate), pb=buildPlayback(P);
+    const buf=ctx.createBuffer(2,P.total,ctx.sampleRate); buf.copyToChannel(pb.L,0); buf.copyToChannel(pb.R,1);
+
+    const src=ctx.createMediaStreamSource(stream);
+    const sp=ctx.createScriptProcessor(4096,2,2);
+    sp.channelCount=2; sp.channelCountMode='explicit'; sp.channelInterpretation='discrete';
+    const chunks0=[], chunks1=[]; let recording=true;
+    sp.onaudioprocess=e=>{ if(!recording) return; chunks0.push(new Float32Array(e.inputBuffer.getChannelData(0))); chunks1.push(new Float32Array(e.inputBuffer.getChannelData(1))); };
+    const mute=ctx.createGain(); mute.gain.value=0;
+    src.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
+
+    await sleep(400);
+    const player=ctx.createBufferSource(); player.buffer=buf; player.connect(ctx.destination);
+    player.start(ctx.currentTime+0.05);
+    const dur=P.total/ctx.sampleRate+0.8, t0=performance.now();
+    while(performance.now()-t0<dur*1000){
+      const f=(performance.now()-t0)/(dur*1000);
+      setStatus(f<0.12?'Listening to silence...':f<0.38?'Sweep (whoosh)...':f<0.6?'Chirps from each speaker...':'High ticks (may be inaudible)...', 0.15+0.7*f);
+      if(f>0.6) $('askcard').style.display='';
+      await sleep(200);
+    }
+    recording=false; stream.getTracks().forEach(t=>t.stop()); sp.disconnect(); src.disconnect();
+    const cat=cs=>{ const n=cs.reduce((a,c)=>a+c.length,0), o=new Float32Array(n); let k=0; for(const c of cs){ o.set(c,k); k+=c.length; } return o; };
+    const ch0=cat(chunks0), ch1=cat(chunks1);
+    await ctx.close();
+
+    setStatus('Analyzing...',0.9); await sleep(50);
+    const A=analyze(ch0,ch1,P);
+    report.analysis=A;
+    lastReport=report;
+    render(report);
+    setStatus('Done. Answer the question above (if shown), then tap Copy results.',1);
+  }catch(e){
+    report.error=String(e && e.stack || e); lastReport=report; render(report);
+    setStatus('Error: '+e.message,1);
+  }
+  $('run').disabled=false;
+}
+
+function verdicts(r){
+  const v=[], A=r.analysis||{}, s=r.trackSettings||{};
+  const add=(cls,t)=>v.push(`<div class="${cls}">● ${t}</div>`);
+  if(r.micError) add('bad','Microphone was blocked. Open this page directly in Chrome (not inside another app) and allow the mic.');
+  const proc=['echoCancellation','noiseSuppression','autoGainControl'].filter(k=>s[k]===true);
+  if(s && Object.keys(s).length) proc.length ? add('warn','Audio processing still on: '+proc.join(', ')) : add('ok','Audio processing off (echo cancel, noise suppression, auto gain)');
+  if(A.channels) add(A.channels==='DISTINCT'?'ok':'bad','Mic channels: '+A.channels+(A.channels==='DISTINCT'?'':' (direction finding would need a native app)'));
+  if(A.geometrySwing_samples!=null) add(Math.abs(A.geometrySwing_samples)>=2?'ok':'warn',`Speaker/mic geometry swing: ${A.geometrySwing_samples} samples (${A.geometrySwing_cm} cm). ${Math.abs(A.geometrySwing_samples)>=2?'Two mics at different spots confirmed.':'Small. Mics may be close together or a speaker may be weak.'}`);
+  if(A.alignConf!=null) add(A.alignConf>20?'ok':'bad','Sweep detected (alignment confidence '+A.alignConf+')');
+  const fr=A.freqResp_dB; if(fr){ const ref=fr[1000][0], at=f=>fr[f]?fr[f][0]-ref:NaN;
+    const u=Math.max(at(18000),at(19000),at(20000));
+    add(u>-20?'ok':u>-35?'warn':'bad',`High band vs 1 kHz: 18k ${at(18000).toFixed(0)} dB, 20k ${at(20000).toFixed(0)} dB, 22k ${at(22000).toFixed(0)} dB`); }
+  if(A.ultrasonic&&A.ultrasonic[0]){ const q=A.ultrasonic[0].snr_dB; add(q>25?'ok':q>12?'warn':'bad',`Ultrasonic chirp SNR: ${q} dB`); }
+  if(A.clippedSamples && A.clippedSamples.some(n=>n>50)) add('warn','Some clipping: try lower volume.');
+  const se=r.sensors||{}; add(se.motionEvents>0?'ok':'bad',`Motion sensors: ${se.motionEvents||0} events (${se.motionHz||0} Hz)`+(se.gyroApiHz?`, gyro API ${se.gyroApiHz} Hz`:''));
+  return v.join('');
+}
+
+function textReport(r){
+  const strip=(k,val)=> (k==='_env'||k==='_p0') ? undefined : val;
+  return JSON.stringify(Object.assign({heardTicks:heard},r), strip, 1).replace(/\n\s*([\]}])/g,'$1').replace(/\[\n\s*/g,'[').replace(/,\n\s+(?=-?[\d"n])/g,(m)=>m.includes(':')?m:', ');
+}
+
+function plotFR(canvas, fr){
+  const c=canvas, g=c.getContext('2d'), W=c.width=c.clientWidth*devicePixelRatio, H=c.height=c.clientHeight*devicePixelRatio;
+  g.clearRect(0,0,W,H); const fs=Object.keys(fr).map(Number); const lo=Math.log(80), hi=Math.log(24000);
+  const all=fs.flatMap(f=>fr[f]).filter(isFinite), top=Math.max(...all)+3, bot=top-60;
+  const X=f=>(Math.log(f)-lo)/(hi-lo)*W, Y=d=>H-(Math.max(d,bot)-bot)/(top-bot)*H;
+  g.strokeStyle='#8884'; g.fillStyle='#888'; g.font=(11*devicePixelRatio)+'px sans-serif';
+  [100,1000,10000,20000].forEach(f=>{ g.beginPath(); g.moveTo(X(f),0); g.lineTo(X(f),H); g.stroke(); g.fillText(f>=1000?f/1000+'k':f, X(f)+3, H-4); });
+  ['#2b8cff','#ff8c2b'].forEach((col,ci)=>{ g.strokeStyle=col; g.lineWidth=2*devicePixelRatio; g.beginPath();
+    fs.forEach((f,i)=>{ const d=fr[f][ci]; if(d==null) return; i?g.lineTo(X(f),Y(d)):g.moveTo(X(f),Y(d)); }); g.stroke(); });
+}
+function plotUS(canvas, u, sr){
+  const c=canvas, g=c.getContext('2d'), W=c.width=c.clientWidth*devicePixelRatio, H=c.height=c.clientHeight*devicePixelRatio;
+  g.clearRect(0,0,W,H); if(!u||!u._env) return;
+  const env=u._env, p0=u._p0, maxM=6, peak=env[Math.round(p0)];
+  const X=m=>m/maxM*W, Y=d=>H-(Math.max(d,-50)+50)/50*H;
+  g.strokeStyle='#8884'; g.fillStyle='#888'; g.font=(11*devicePixelRatio)+'px sans-serif';
+  for(let m=1;m<=maxM;m++){ g.beginPath(); g.moveTo(X(m),0); g.lineTo(X(m),H); g.stroke(); g.fillText(m+'m',X(m)+3,H-4); }
+  g.strokeStyle='#2b8cff'; g.lineWidth=1.5*devicePixelRatio; g.beginPath();
+  for(let i=Math.round(p0);i<env.length;i++){ const m=(i-p0)/sr*343/2; if(m>maxM) break; const y=Y(db(env[i]/peak)); i===Math.round(p0)?g.moveTo(X(m),y):g.lineTo(X(m),y); }
+  g.stroke();
+}
+
+function render(r){
+  $('resultscard').style.display='';
+  $('verdicts').innerHTML=verdicts(r);
+  const A=r.analysis;
+  if(A&&A.freqResp_dB) plotFR($('frc'),A.freqResp_dB);
+  if(A&&A.ultrasonic) plotUS($('usc'),A.ultrasonic[0],r.sampleRate);
+  $('out').value=textReport(r);
+}
+
+document.querySelectorAll('#askcard button').forEach(b=>b.onclick=()=>{
+  heard=b.dataset.h; document.querySelectorAll('#askcard button').forEach(x=>x.classList.toggle('sel',x===b));
+  if(lastReport) $('out').value=textReport(lastReport);
+});
+$('run').onclick=run;
+$('copy').onclick=async()=>{
+  const t=$('out').value;
+  try{ await navigator.clipboard.writeText(t); $('copymsg').textContent='Copied. Paste it into the chat.'; }
+  catch(e){ $('out').focus(); $('out').select(); try{ document.execCommand('copy'); $('copymsg').textContent='Copied (fallback). Paste it into the chat.'; }catch(e2){ $('copymsg').textContent='Copy blocked: long-press the text box, Select all, Copy.'; } }
+};
+}
+if (typeof module!=='undefined') module.exports={fft,xcorr,makePlan,buildPlayback,analyze};
+</script>
+</body>
+</html>
