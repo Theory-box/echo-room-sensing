@@ -86,7 +86,13 @@ function summarize(rep) {
   const good = rep.runs.filter(r => r.analysis && r.analysis.channels === 'DISTINCT');
   const s = { distinctConfigs: good.map(r => r.config) };
   if (good.length) {
-    const best = good.slice().sort((a, b) => Math.abs(b.analysis.geometrySwing_samples || 0) - Math.abs(a.analysis.geometrySwing_samples || 0))[0];
+    // Prefer raw capture (UNPROCESSED, no clipping), then a clear geometry swing, then low noise.
+    // Processed modes (e.g. CAMCORDER) can mix mics into each channel, which distorts timing.
+    const score = r => (r.config.startsWith('UNPROCESSED') ? 100 : 0)
+      - (r.analysis.clippedSamples.some(n => n > 50) ? 50 : 0)
+      + Math.min(Math.abs(r.analysis.geometrySwing_samples || 0), 20)
+      - r.analysis.noiseFloor_dBFS[0] / 10;
+    const best = good.slice().sort((a, b) => score(b) - score(a))[0];
     s.best = best.config;
     s.verdict = 'Simultaneous separate mics available (' + best.config + ').';
   } else s.verdict = 'No mode gave distinct mic channels.';
