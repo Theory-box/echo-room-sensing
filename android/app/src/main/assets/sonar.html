@@ -17,12 +17,23 @@
   label { display: flex; align-items: center; gap: 8px; font-size: .9em; color: #8bb; }
   select { font: inherit; background: #111; color: #cfe; border: 1px solid #355; border-radius: 6px; padding: 4px; }
   .mut { color: #6a8; font-size: .85em; }
+  /* Landscape: radar on the left sized to the screen height, everything else in a scrollable right column */
+  @media (orientation: landscape) {
+    html, body { height: 100%; overflow: hidden; }
+    #wrap { display: flex; gap: 12px; height: 100%; box-sizing: border-box; padding: 6px 10px; }
+    #radarcol { flex: 0 0 auto; height: 100%; }
+    #radarcol canvas { height: 100%; width: auto; }
+    #sidecol { flex: 1; overflow-y: auto; height: 100%; padding-right: 4px; }
+    #dist { font-size: 1.8em; }
+    .row { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <div class="row"><button class="alt" id="back">◀ Back</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button></div>
-  <canvas id="ppi" width="720" height="720"></canvas>
+  <div id="topbtns" class="row"><button class="alt" id="back">◀ Back</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button></div>
+  <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
+  <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
   <div class="mut" style="text-align:center">distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity</div>
@@ -51,6 +62,7 @@
     Echoes are painted in the direction the phone points; your body blocks most sound from behind.
     Direction is rough (tens of degrees); distance is precise. You'll hear faint ticks.</p>
   <div id="status" class="mut"></div>
+  </div>
 </div>
 <script src="dsp.js"></script>
 <script>
@@ -332,13 +344,26 @@ $('ping').onchange = $('rate').onchange = () => { if (running) { stop(); start()
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(); } };
 drawFrame(null, 5);
+// Buttons: above the radar in portrait, top of the right column in landscape.
+function placeButtons() {
+  const land = matchMedia('(orientation: landscape)').matches, btns = $('topbtns');
+  if (land && btns.parentNode !== $('sidecol')) $('sidecol').insertBefore(btns, $('sidecol').firstChild);
+  if (!land && btns.parentNode !== $('wrap')) $('wrap').insertBefore(btns, $('radarcol'));
+}
+matchMedia('(orientation: landscape)').addEventListener('change', placeButtons);
+// Remember settings between visits (per-device convenience; falls back silently if storage is unavailable).
+const SAVED = ['range', 'rate', 'ping', 'hold', 'dirf', 'sens', 'mask', 'vol'];
+try { const st = JSON.parse(localStorage.getItem('sonarSettings') || '{}'); for (const k of SAVED) if (st[k] !== undefined) $(k).value = st[k]; $('volv').textContent = $('vol').value + '%'; } catch (e) { }
+function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings', JSON.stringify(st)); } catch (e) { } }
+for (const k of SAVED) $(k).addEventListener('change', saveSettings);
+
 function applyHold() {
   const land = $('hold').value === 'land';
   $('howland').style.display = land ? '' : 'none'; $('howfwd').style.display = land ? 'none' : '';
   try { Native.setOrient(land ? 'landscape' : 'reverse'); } catch (e) { try { Native.setReversed(!land); } catch (e2) { } }
 }
 $('hold').onchange = () => { clearAcc(); applyHold(); };
-applyHold();   // bottom-edge forward: screen rotated 180°; landscape: screen landscape (bottom edge on the right)
+placeButtons(); applyHold();   // bottom-edge forward: screen rotated 180°; landscape: screen landscape (bottom edge on the right)
 </script>
 </body>
 </html>
