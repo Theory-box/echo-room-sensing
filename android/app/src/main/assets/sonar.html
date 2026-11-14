@@ -25,7 +25,7 @@
   <canvas id="ppi" width="720" height="720"></canvas>
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
-  <div class="mut" style="text-align:center">distance graph: white = ahead, grey = to the side, red = from behind (ignored); dashed line = sensitivity</div>
+  <div class="mut" style="text-align:center">distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity</div>
   <div id="dist">–</div>
   <div class="mut" style="text-align:center">nearest echo ahead</div>
   <div id="bar"><div></div></div>
@@ -35,7 +35,7 @@
     <label>Ping <select id="ping"><option value="strong" selected>Strong (audible)</option><option value="quiet">Quiet</option></select></label>
   </div>
   <div class="row">
-    <label>Direction filter <select id="dirf"><option value="on" selected>On</option><option value="off">Off</option></select></label>
+    <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option></select></label>
   </div>
   <div class="row">
     <label>Sensitivity <select id="sens"><option value="-34">Low</option><option value="-38" selected>Medium</option><option value="-42">High</option></select></label>
@@ -110,7 +110,7 @@ function paint(theta, prof, binM, maxR, mask) {
   const step = RPX * binM / maxR;
   for (let i = 0; i < prof.length; i++) {
     const r = i * binM; if (r < mask || r > maxR) continue;
-    const v = prof[i]; if (v < 0.2) continue;
+    const v = prof[i]; if (v < 0.1) continue;
     actx.strokeStyle = `rgba(${Math.round(60 + 140 * v)},255,${Math.round(90 + 60 * v)},${Math.min(1, v * 0.9).toFixed(3)})`;
     actx.lineWidth = Math.max(2, step * 1.2);
     actx.beginPath(); actx.arc(CX, CY, RPX * r / maxR, a - half, a + half); actx.stroke();
@@ -237,10 +237,11 @@ async function loop() {
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
-        const f = $('dirf').value === 'off' ? 1 : q.dir === 'ahead' ? 1 : q.dir === 'side' ? 0.45 : 0;
+        // Full: confirmed-ahead bright, unsure (side) and behind dimmed. Clean: confirmed-ahead only.
+        const f = q.dir === 'ahead' ? 1 : $('dirf').value === 'clean' ? 0 : q.dir === 'side' ? 0.4 : 0.25;
         for (let dd = -1; dd <= 1; dd++) { const i = q.b + dd; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], f * tp.prof[i]); }
       }
-      const front = $('dirf').value === 'off' ? kept : kept.filter(q => q.dir === 'ahead');
+      const front = kept.filter(q => q.dir === 'ahead');   // distance readout: confirmed-ahead echoes only
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
         e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0]]) });
