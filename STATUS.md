@@ -261,3 +261,19 @@ tape measure before orientation in the sparse-room test.
 
 ## 16. Related research
 See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app).
+
+## 17. Back-burner ideas (user's brainstorming, 2026-11-14) — not started
+- **Per-direction learning with confidence** (~65% it noticeably steadies the radar, ~1 h): keep a running average per
+  ~10° heading slice instead of fading each click; the longer you point somewhere the cleaner it gets; show a confidence
+  number/shading per direction; learned picture also makes changes (door, person) stand out. Needs reset on moving.
+  Runs alongside the clicks, not as a separate pass.
+- **Ambient-noise learning/subtraction** (fans, hum): small gain in normal rooms — noise is already 80–93 dB below the
+  click vs echoes at 40–50 dB, and Quiet (long) is above most fan noise. Could matter in noisy rooms / Strong mode
+  (per-direction CFAR threshold, spectral weighting). Low priority.
+- **Funnel / horn on the bottom edge** (~60% visible gain in Quiet (long)): paper test first. Protocol: stand ~2 m from a
+  wall, Quiet (long), Start, slow full turn (~20–30 s), Stop; repeat with the funnel; compare logs (angular width of the
+  wall echo, floor/ceiling rings, consistency). Funnel taped to the phone's edges, extending past the bottom, screen and
+  back mic uncovered. With a funnel, the back-mic ahead/behind check should probably be switched off.
+- **Cycling ping bands** (frequency diversity): cross-confirm echoes seen in several bands; an inaudible variant would
+  cycle within 16–22 kHz.
+- From RESEARCH.md: track echoes over time; subtract the phone's own direct/body signal; ARCore pose for room mapping.
