@@ -258,3 +258,6 @@ tape measure before orientation in the sparse-room test.
   clutter, so it's a plain threshold like a real sonar. WebView needed a WebViewClient for in-app navigation.
 - Verified on device: runs ~12–20 ms/frame, paints echoes, nearest-echo readings 1.4–2.4 m by a desk. Not yet judged by
   the user in real use.
+
+## 16. Related research
+See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app).
