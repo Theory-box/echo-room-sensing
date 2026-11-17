@@ -70,3 +70,17 @@ room-geometry inference from simulated data, or narrow phone sensing tasks (auth
   *directional* sonar/radar because they retroreflect over a wide range of angles, not because they are louder.
   (Our simulator's "corners strongest" referred to accumulated evidence in the wall-fit map across all headings, not raw
   echo amplitude — that wording was misleading.)
+
+## Third microphone — device check on the Pixel 11 (2026-11-17)
+- Google's Pixel 11 hardware diagram: 3 mics — top edge, rear (camera bar), bottom edge.
+  https://support.google.com/pixelphone/answer/7157629
+- Phone audio policy (dumpsys media.audio_policy): built-in mic port supports channel index masks 0x7 and 0xF (3 and 4
+  channels); Android's MicrophoneInfo only lists "bottom" and "back".
+- Silent 3-channel capture (UNPROCESSED, 0x7, 16–22 kHz sweep from the bottom speaker, phone still): ch1 = bottom mic
+  (first); ch2 +10.4 samples; ch3 +14.6 samples; all three carry room echoes and the same noise floor → three real mics.
+  ch2/ch3 are the two top-end mics (camera bar and top edge), only ~4 samples apart → ~1.5–3 cm apart (cf. 15 mm on
+  Pixel 6 in SpeechCompass). Which of ch2/ch3 is which isn't settled by timing. The 4-channel capture adds a channel
+  coincident with ch1.
+- (An earlier quick analysis wrongly put ch3 next to the bottom mic — it picked a weak click.)
+- Conclusion: the third mic gives a thin triangle (~14 cm × ~1.5–3 cm). Expected sonar gain is small; not worth building
+  on before cheaper improvements.
