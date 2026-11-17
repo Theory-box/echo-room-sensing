@@ -44,3 +44,29 @@ room-geometry inference from simulated data, or narrow phone sensing tasks (auth
    or which echoes are real). Fits the earlier "cycle bands" idea. Back burner.
 5. **Learned denoising trained on our simulator** (Saranga, EchoScan): our simulator could generate training data.
    Big effort; long-term.
+
+## Third microphone (researched 2026-11-17)
+- **Pixel 11 has 3 microphones** (Google spec pages). Placement isn't published in the spec.
+- **Google's SpeechCompass (CHI 2025, Best Paper)**, phone-only version on an unmodified **Pixel 6**: three mics at the
+  **bottom edge, top edge, and near the rear camera**. The camera mic is only **15 mm** from the top mic — "too small for
+  useful delay estimates", so only two pairs were usable and localization stayed **180°** (front/back ambiguity
+  unresolved). Mean error 16° (speech) / 23° (environmental sound). The authors note a camera mic placed farther left
+  (larger baseline) would have allowed 360°. Their 4-mic phone case got 360° and 11–22° error.
+  https://arxiv.org/abs/2502.08848 · https://research.google/blog/making-group-conversations-more-accessible-with-sound-localization/
+- **UT Dallas SSPRL "Three Mic DOA" Android app (2020)**: the guide's Android capture uses **two** sources (MIC = bottom,
+  CAMCORDER = near camera), stereo max; "Android doesn't guarantee two-channel recording for all phones".
+  https://labs.utdallas.edu/ssprl/files/2020/09/Users-Guide-Android-ThreeMicDOA.pdf
+- **Android API**: >2 mics need a channel *index* mask (e.g. 0x7) on AudioRecord; whether the HAL exposes 3 distinct mics
+  is vendor-dependent. Our app already records 3 channels on the Pixel 11 (UNPROCESSED, mask 0x7); MicrophoneInfo lists
+  only "bottom" and "back" with positions; ch3's identity is unknown (timing close to the bottom mic).
+- **Implication for the sonar**: if Pixel 11 keeps the Pixel 6-style layout, the third mic adds a ~1.5 cm baseline next
+  to the back/top mic → little direction gain. Residual device question (research can't answer): where ch3 is. The
+  app's Scratch test answers it in ~30 s.
+
+## Wall vs corner echoes (established room acoustics)
+- Image-source model: each reflection's amplitude = product of the wall reflection coefficients × 1/path length. A
+  flat wall's first-order (perpendicular) reflection has one bounce and the shortest path → normally the strongest echo.
+  A corner between two walls is a second-order path (two bounces, longer) → weaker. Corners/trihedrals matter for
+  *directional* sonar/radar because they retroreflect over a wide range of angles, not because they are louder.
+  (Our simulator's "corners strongest" referred to accumulated evidence in the wall-fit map across all headings, not raw
+  echo amplitude — that wording was misleading.)
