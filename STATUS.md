@@ -412,3 +412,13 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   Simulation (Quiet 15/s, moving wall): detected in 46/46 frames at 0, 6.75, 10, −20 cm/s (old: 46, 6, 34, 28 of 46) with
   correct speeds; Full sweep 30 cm/s and Strong fine. Cost: noise averages less than with the coherent fold (static
   echoes may be ~2–3 dB weaker in noise-limited cases). Needs a real retest.
+- **Third real speed test (22:11, after non-coherent averaging, 164 s, two clears):** walking toward the wall the echo went
+  2.44 → 1.21 m (~25 cm/s) and speeds spread +18…+35; still = solid 0; walking back −14…−28. Snapping to 13.5 multiples
+  among moving readings fell 80–84% → 46% (chance ≈ 22%). Leftovers: some ±13.5 jumps on still walls, a few wild values
+  (−568) from echo mix-ups → echo tracking (next). ~28 ms/frame at 15/s. User: "seems to work pretty well".
+- **Near-zone static removal (2026-11-17):** per click, complex response ÷ its own direct sound; running average (mean
+  for the first clicks, then α 0.04 ≈ 25 clicks) per mic within 0.6 m, fading to nothing by 0.75 m; residual envelope
+  replaces the plain one there. Reset on start/restart/clear. New "Hide closer than 0.15 m" option. Frames log bg = 1 when
+  active. Simulation: still body echo 0.34 m removed in Quiet/Full/Strong; moving hand ~0.45 m detected 28/31 (was 14/31)
+  Quiet, 16/16 (was 8/16) Strong, 31/31 (was 13/31) Full; still wall 2 m and moving wall unaffected. Expected side effect:
+  after a grip change, ~1–2 s of near-zone junk while it relearns.
