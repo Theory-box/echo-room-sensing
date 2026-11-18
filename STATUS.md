@@ -702,3 +702,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   −0.74/−0.81 at 330–390 ms) — the motion signal is back; best single slot −0.77 at 320 ms. Scale 0.18 (best slot
   0.31) vs 0.38–0.64 for the hum: the size reads small. The same analysis on groups of 16 ordinary tones: +0.33 at a
   random lag (nothing) → the pilots carry it. Map cost of pilots not visible (14:19 run: more echoes than plain tones).
+- **Build "live pilot motion" (2026-11-18): Quiet tones + pilots tracks the phone's movement live.** Every 256
+  samples (~190/s) a 2048-sample window → the 16 pilots (direct DFT, window start undone) → minus a ~3 s running
+  average (static part) → 64-slot coarse profile → per hop the median phase step over slots > 6 away from the direct
+  sound → mm, summed (PT.cum; + = paths got longer). Gap between readings → phase continuity reset, static part kept.
+  Logged per reading: pm (total mm), pmn (windows), pmh ([page ms, total mm] per window); status line shows
+  "phone moved … mm (sound)". Replay of the 14:23 push run through the app's own code: correlation −0.71 with the
+  sensor's forward movement at +171 ms, scale 0.23 (offline: −0.69, 0.18). Size still uncalibrated (needs a known
+  movement, e.g. sliding the phone one paper length on a table). Not yet used for distances or front/back.

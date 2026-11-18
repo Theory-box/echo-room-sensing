@@ -167,6 +167,71 @@ function toneProfile(xr, start, ch) {
   fft(br, bi, true);
   return { re: br, im: bi };
 }
+// ---------- live phone-movement tracking from the pilot tones (2026-11-18) ----------
+// Every PT_HOP samples (~190 times a second) a full 2048-sample window gives each pilot tone's received value (the
+// signal repeats every 2048 samples, so any window works once its start is undone). Minus a slow running average
+// (the static part: direct sound, still room), the 16 pilots form a coarse distance profile (64 slots, repeating
+// every 0.457 m); away from the direct sound, each slot's phase turns as the phone moves toward/away from what echoes
+// there (one turn per ~9 mm). Per hop, the median phase step over those slots -> movement in mm, summed into PT.cum.
+// + = paths got longer (moving away from what echoes), - = closer. Offline on the 14:23 push run: follows the motion
+// sensor with correlation 0.69 (size not yet calibrated: 0.2-0.3x the sensor).
+const PT_HOP = 256, PT_NP = HS_NT / HS_PSTEP, PT_M = 64;
+let PT = null, PT_TW = null;
+function ptReset() { PT = null; }
+function ptTwiddles() {
+  if (PT_TW) return PT_TW;
+  PT_TW = [];
+  for (let j = 0; j < PT_NP; j++) {
+    const k = HS_K0 + HS_POFF + HS_PSTEP * j, c = new Float32Array(HS_P), sn = new Float32Array(HS_P);
+    for (let n = 0; n < HS_P; n++) { c[n] = Math.cos(2 * Math.PI * k * n / HS_P); sn[n] = Math.sin(2 * Math.PI * k * n / HS_P); }
+    PT_TW.push({ k, c, s: sn });
+  }
+  return PT_TW;
+}
+// xr: interleaved stereo of the latest L samples ending at absolute sample `frames`; tAt(abs) -> page-clock ms
+function pilotTrack(xr, L, frames, tAt) {
+  const tw = ptTwiddles(), bufStart = frames - L, fc = (HS_K0 + HS_POFF + HS_PSTEP * (PT_NP - 1) / 2) * SR / HS_P;
+  if (!PT) PT = { cum: 0, hist: [], S: null, n: 0, last: null, next: Math.ceil(bufStart / PT_HOP) * PT_HOP };
+  if (PT.next < bufStart || PT.next > frames) { PT.next = Math.ceil(bufStart / PT_HOP) * PT_HOP; PT.last = null; }   // gap: phase continuity lost (keep the static part)
+  let used = 0;
+  while (PT.next + HS_P <= frames) {
+    const s = PT.next - bufStart, ph0 = PT.next % HS_P, Br = new Float64Array(PT_NP), Bi = new Float64Array(PT_NP);
+    for (let j = 0; j < PT_NP; j++) {
+      const { k, c, s: sn } = tw[j]; let re = 0, im = 0;
+      for (let n = 0; n < HS_P; n++) { const v = xr[2 * (s + n)]; re += v * c[n]; im -= v * sn[n]; }
+      const a = -2 * Math.PI * k * ph0 / HS_P, ca = Math.cos(a), sa = Math.sin(a);   // undo the window start
+      Br[j] = re * ca - im * sa; Bi[j] = re * sa + im * ca;
+    }
+    // static part: plain mean while learning (first ~1 s), then a ~3 s running average
+    if (!PT.S) PT.S = { r: new Float64Array(PT_NP), i: new Float64Array(PT_NP) };
+    PT.n++; const al = Math.max(PT_HOP / (3 * SR), 1 / PT.n);
+    for (let j = 0; j < PT_NP; j++) { PT.S.r[j] += al * (Br[j] - PT.S.r[j]); PT.S.i[j] += al * (Bi[j] - PT.S.i[j]); }
+    if (PT.n > 40) {
+      const dr = new Float64Array(PT_M), di = new Float64Array(PT_M), sr_ = new Float64Array(PT_M), si = new Float64Array(PT_M);
+      for (let j = 0; j < PT_NP; j++) {
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (j + 1) / (PT_NP + 1));
+        dr[j] = w * (Br[j] - PT.S.r[j]); di[j] = w * (Bi[j] - PT.S.i[j]); sr_[j] = w * PT.S.r[j]; si[j] = w * PT.S.i[j];
+      }
+      fft(dr, di, true); fft(sr_, si, true);
+      let d0 = 0, best = -1; for (let m = 0; m < PT_M; m++) { const v = sr_[m] * sr_[m] + si[m] * si[m]; if (v > best) { best = v; d0 = m; } }
+      const ang = new Float64Array(PT_M); for (let m = 0; m < PT_M; m++) ang[m] = Math.atan2(di[m], dr[m]);
+      if (PT.last) {
+        const steps = [];
+        for (let m = 0; m < PT_M; m++) {
+          const dd = Math.min((m - d0 + PT_M) % PT_M, (d0 - m + PT_M) % PT_M); if (dd <= 6) continue;
+          let st = ang[m] - PT.last[m]; st -= 2 * Math.PI * Math.round(st / (2 * Math.PI)); steps.push(st);
+        }
+        steps.sort((a, b) => a - b);
+        const med = steps[steps.length >> 1];
+        PT.cum += -med * C / (2 * Math.PI * fc) / 2;
+        PT.hist.push([tAt(PT.next + HS_P / 2), PT.cum]); if (PT.hist.length > 2000) PT.hist.splice(0, 500);
+      }
+      PT.last = ang;
+    }
+    PT.next += PT_HOP; used++;
+  }
+  return used;
+}
 // the latest HS_J whole periods of the reading -> the same outputs the click pipeline produces (direct sound at 0)
 function hsProfiles(xr, L, maxR) {
   const nb = Math.min(HS_P - 300, Math.round(2 * maxR / C * SR)), o = L - HS_J * HS_P;
@@ -489,7 +554,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 pilot tones';
+const APP_BUILD = '2026-11-18 live pilot motion';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -1069,8 +1134,15 @@ function frame(binM, binS, t0) {
         let a = 0, b = 0; for (let j = 0; j < np; j++) { const ii = i + j * PL; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
         x[i] = x[i + PL] = a / np; x2[i] = x2[i + PL] = b / np;
       }
-      let raw, peak, noise, d, env, nb, T, env2, raw2, noise2, tA = null, tB = null;
-      if (HS) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T } = hsProfiles(xr, L, +$('range').value));
+      let raw, peak, noise, d, env, nb, T, env2, raw2, noise2, tA = null, tB = null, ptUsed = 0;
+      if (HS) {
+        ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T } = hsProfiles(xr, L, +$('range').value));
+        if (PINGS[$('ping').value].pilots) {
+          let cf = null, cage = 0; try { const ck = Native.sonarClock ? Native.sonarClock() : ''; if (ck) [cf, cage] = ck.split(',').map(Number); } catch (e) { }
+          const nowP = performance.now();
+          ptUsed = pilotTrack(xr, L, frames, abs => cf === null ? nowP - (frames - abs) / SR * 1000 - 40 : nowP - cage + (abs - cf) / SR * 1000);
+        }
+      }
       else if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
       else {
         ({ raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value));
@@ -1230,7 +1302,8 @@ function frame(binM, binS, t0) {
           q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1), +(100 * q.dc).toFixed(1),
           q.mo ? [+q.mo.uf.toFixed(2), +q.mo.us.toFixed(2), +q.mo.zf.toFixed(1), +q.mo.zs.toFixed(1), q.mo.n, +(100 * q.mo.fwdRms).toFixed(1), +(100 * q.mo.res).toFixed(1)] : null,
           q.rd ? [q.rd.v, +q.rd.uf.toFixed(2), +q.rd.us.toFixed(2), +q.rd.z.toFixed(1), q.rd.n, +(100 * q.rd.mot).toFixed(2)] : null]), mn: mnClicks, fr: frames,
-        tc: Math.round(t0 - ageMs), cs: clkSrc, ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [],
+        tc: Math.round(t0 - ageMs), cs: clkSrc, pm: PT && ptUsed ? +(1000 * PT.cum).toFixed(2) : null, pmn: ptUsed,
+        pmh: PT && ptUsed ? PT.hist.slice(-ptUsed).map(h => [Math.round(h[0]), +(1000 * h[1]).toFixed(2)]) : undefined, ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [],
         pv: pvNow ? [+(100 * (pvNow.e * Math.sin(psiNow) + pvNow.n * Math.cos(psiNow))).toFixed(1), +(100 * (pvNow.e * Math.cos(psiNow) - pvNow.n * Math.sin(psiNow))).toFixed(1)] : null, na: MO ? MO.n : 0,
         nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]), p: tp.rawDb });
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
@@ -1252,7 +1325,8 @@ function frame(binM, binS, t0) {
       const nd = vals.length >= Math.min(2, nearHist.length) && vals.length ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
-      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`);
+      const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
+      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
 
@@ -1317,7 +1391,7 @@ async function start(keep) {
   }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
-  running = true; lastFrames = -1; staleSince = 0; motionReset(); MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map(); resetTracks();
+  running = true; lastFrames = -1; staleSince = 0; motionReset(); ptReset(); MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map(); resetTracks();
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
   logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
@@ -1336,7 +1410,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
