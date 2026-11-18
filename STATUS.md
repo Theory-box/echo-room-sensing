@@ -350,3 +350,31 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   (updown / eq), off. The user's log of the eq version: weights [2.22,1,.86,.25,.25,.25,.75,4,4,4], 48% of echoes >3 m.
 - Back-burner: two speakers (bottom + earpiece) with separable signals (MIMO): ~doubles the ahead/behind baseline, no
   left/right, not for Quiet; earpiece weak.
+
+## 21. Ideas for later (theory discussion 2026-11-17) — nothing built, no tests planned yet
+- **Micronavigation = the foundation.** Estimate the phone's tiny movement between clicks from its OWN echoes (as
+  synthetic-aperture sonar does with overlapping receivers / "displaced phase centre", plus autofocus), with the gyro
+  for rotation and the accelerometer for short moves. Unlocks: (a) correct placement of echoes in today's Map (replaces
+  the fixed ARM = 25 cm assumption → less blur from body sway); (b) motion-compensated averaging (align clicks before
+  folding → stronger faint echoes); (c) approach speed per echo (collision warning, moving vs still); (d) walking
+  odometry (+ step counter, + echo fingerprints to fix drift, cf. BatMapper / ELF-SLAM) → walk-around room maps;
+  (e) synthetic-aperture imaging. Needs fast clicks for phase tracking: unambiguous speed ≈ λ/(4·click interval)
+  (Quiet 8/s ≈ 3.4 cm/s; 4 kHz part of Full sweep at 15/s ≈ 32 cm/s).
+- **Correction (checked with clean click pairs, no clears/room changes):** the Quiet inconsistency is BETWEEN the two mics
+  (Quiet ~12–15 samples, Full sweep ~4–5). One mic compared with itself across clicks should stay coherent when the phone
+  barely moves — that is what micronavigation / backprojection need. Untested.
+- **Backprojection (time-domain, as in SAR/SAS):** grid of the room; for every click and every cell add the click's echo
+  value at that cell's round-trip distance from the phone position. Magnitude-only = triangulation (fallback); with
+  phase = coherent, sharp to ~λ/aperture. Smooth walls are built only by the clicks that face them.
+- **Lazy Susan mode:** phone taped off-centre (bottom edge out), turned freely by hand (pauses / backwards fine), gyro
+  gives the angle → known circular aperture (UW 2026 turntable preprint did this with the object rotating). Expect a 360°
+  top-down outline from one spot, walls within ~10–30 cm at 2–3 m; up/down still ambiguous; coverage tracking with a
+  faint "this direction is done" sound. Odds: sharp ~45–55%, fallback beats today's Map ~75%. Handheld sharp version
+  later via micronavigation + autofocus (~20–30%).
+- Other parked ideas: echo feature detectors from Full sweep (hard/soft by high-vs-low pitch, smooth/rough by echo
+  spread, corners by persistence across headings, small objects by high pitch); continuous ~20 kHz tone as a motion
+  layer; Doppler beam sharpening; interference-pattern sampling (one moving mic + fixed reference = virtual array);
+  user-supplied mouth clicks as a source (works, ≈ Strong mode). Rejected with reasons: 96 kHz (phone's speaker and mic
+  routes are 48 kHz only; speaker weak >20 kHz), system ultrasound path (privileged; same speaker, same 48 kHz route),
+  combining speakers/mics for higher rates (anti-alias filters, linear superposition), exotic sound shapes (a still
+  room is linear: any full-band sound measures the same response).
