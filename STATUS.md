@@ -570,3 +570,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   18.1 / 19.0 / 14.3 dB above the profile median with 1 / 2 / 4 bands; bumps over median+7 dB per reading 7 / 3 / 2.
   Sim (clean single reflectors, no speckle → only the cost shows): fewer threshold crossings in Quiet (−25…30 %), walls
   47 / 43 / 42 of 48, distance error still ≤ 1 cm median. Installed; not yet tested on the phone.
+- **Pitch bands on the phone (2026-11-18 12:09–12:16, same spot, Quiet long 15/s, High, full turns; 2 / 4 / 1 bands,
+  127 / 115 / 164 s).** Echoes per reading 3.83 / 1.95 / 2.42 (2 / 4 / 1 bands); confirmed share 70 / 70 / 62 %;
+  same-track step between readings median 0.40 / 0.60 / 0.60 cm (90 %: 2.0 / 2.6 / 2.6); 1-s wobble sd median
+  1.29 / 1.47 / 1.66 cm; walls per minute 32 / 22 / 34. → 2 bands best on every measure except walls/min (≈ 1 band);
+  default stays 2.
+- **OS-CFAR vs the current median threshold, offline on the logged raw profiles (same sessions).** Proxy: a detection
+  is "persistent" if it reappears within ±6 cm in ≥ 3 of the 8 neighbouring readings. At matched persistent rates the
+  OS-CFAR (±10 cells, 2 guard, 75th percentile) lets through more non-persistent detections: 2 bands 24 % vs
+  13–18 % (median +5…+7 dB); 1 band 25–26 % vs 18 %. Reason: walls are 10–15 cm humps, so the local reference
+  window measures the wall's own hump. Not built. Also: at median +7 dB, 2 bands give 2.04 persistent / 13 %
+  non-persistent per reading vs 1.85 / 18 % with 1 band.
