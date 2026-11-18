@@ -79,7 +79,9 @@ const PINGS = {
   // test: one long sweep over everything the speaker/mics do (2-22 kHz). Distance from the whole band (~3x sharper
   // than Quiet's 6 kHz); two-mic timing from its 2-8 kHz part only (longer wavelengths -> the mics agree better).
   // Gentle 10% edge ramps instead of Hann, so the low start of the sweep isn't faded out.
-  wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
+  // Clicks alternate up-sweeps and down-sweeps (movement shifts their distances in opposite directions, so the
+  // average stays put), and the sweep spends more time in the pitches this phone plays weakly ("eq", measured at Start).
+  wide: { sig: null, amp: 0.9, fill: 0.5, lowTo: 8000, updown: true, eq: true },
 };
 let PING = PINGS.strong.sig;
 let PING_LOW = null;   // low-band part of the sweep (start of it) for the two-mic timing, or null = use the whole ping
@@ -363,6 +365,65 @@ function micLag(e1, e2, c, half = 18, maxLag = 26) {
 }
 function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' : 'side'; }
 
+// ---------- full sweep: shaped sweeps (speaker equalizer) and up/down alternation ----------
+const EQ_EDGES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000, 22000];
+let EQW = null, eqFrames = 0, eqPending = false;   // per-band time weights (null = flat sweep while measuring)
+let PING_UP = null, PING_DN = null, LOW_UP = null, LOW_DN = null;
+// n-sample sweep, linear inside each band, f0 -> f1 (or f1 -> f0 if down); time spent in band k ~ w[k]. 10% edge
+// ramps. lowOff/lowLen: where its part below lowTo Hz sits (used for the two-mic timing).
+function shapedSweep(n, edges, w, down, lowTo) {
+  const K = w.length, sw = w.reduce((a, b) => a + b, 0), I = new Float32Array(n), Q = new Float32Array(n);
+  const order = [...Array(K).keys()]; if (down) order.reverse();
+  let ph = 0, i = 0, lowLen = 0;
+  for (let oi = 0; oi < K; oi++) {
+    const k = order[oi], m = oi === K - 1 ? n - i : Math.round(n * w[k] / sw);
+    const fa = down ? edges[k + 1] : edges[k], fb = down ? edges[k] : edges[k + 1];
+    for (let j = 0; j < m && i < n; j++, i++) {
+      const f = fa + (fb - fa) * (j + 0.5) / m;
+      I[i] = Math.cos(ph); Q[i] = Math.sin(ph); ph += 2 * Math.PI * f / SR;
+      if (f <= lowTo) lowLen++;
+    }
+  }
+  const r = Math.max(1, Math.round(0.1 * n));
+  for (let j = 0; j < r; j++) { const g = 0.5 - 0.5 * Math.cos(Math.PI * j / r); I[j] *= g; Q[j] *= g; I[n - 1 - j] *= g; Q[n - 1 - j] *= g; }
+  return { I, Q, lowOff: down ? n - lowLen : 0, lowLen };
+}
+const subTpl = (p, off, len) => ({ I: p.I.slice(off, off + len), Q: p.Q.slice(off, off + len), off });
+// Speaker equalizer: from the received (flat) up-sweep, energy per 2 kHz band ~ |H|^2. Spend time ~ 1/|H| per band
+// ("half-way" whitening: weak pitches get more time, but not so much that strong ones are starved), capped at x4 / x0.25
+// around the median. Measured from the click's own sound as it reaches the bottom mic, with your grip.
+function measureEq(seg) {
+  let N = 1; while (N < seg.length) N <<= 1;
+  const ar = new Float64Array(N), ai = new Float64Array(N); ar.set(seg); fft(ar, ai, false);
+  const band = EQ_EDGES.slice(1).map((f1, k) => {
+    let e = 0; const b0 = Math.floor(EQ_EDGES[k] / SR * N), b1 = Math.floor(f1 / SR * N);
+    for (let b = b0; b < b1; b++) e += ar[b] * ar[b] + ai[b] * ai[b];
+    return e + 1e-30;
+  });
+  const w = band.map(e => 1 / Math.sqrt(e));                  // energy ~ |H|^2 -> weight ~ 1/|H|
+  const med = [...w].sort((a, b) => a - b)[w.length >> 1];
+  return w.map(v => Math.max(0.25, Math.min(4, v / med)));
+}
+// Up and down sweep in one folded click pair (x = [pair, pair]): distance profiles from both, each normalized to its
+// own direct sound, then averaged; the same for the back mic; low-band envelopes for the two-mic timing.
+function pairProfiles(x, x2, maxR) {
+  const T = PING_UP.I.length, P2 = 2 * PERIOD;
+  const nb = Math.max(10, Math.min(PERIOD - T - 1, Math.round(2 * maxR / C * SR)));
+  const eU = envOf(x, PING_UP), eD = envOf(x, PING_DN), fU = envOf(x2, PING_UP), fD = envOf(x2, PING_DN);
+  const dU = argmax(eU, 0, P2), dD = argmax(eD, 0, P2), pU = eU[dU] + 1e-12, pD = eD[dD] + 1e-12;
+  const raw = new Float64Array(nb), raw2 = new Float64Array(nb);
+  for (let i = 0; i < nb; i++) { raw[i] = 0.5 * (eU[dU + i] / pU + eD[dD + i] / pD); raw2[i] = 0.5 * (fU[dU + i] / pU + fD[dD + i] / pD); }
+  const tail = (e, d0, p) => { const t = e.subarray(d0 + nb, d0 + PERIOD - T); return t.length > 50 ? pct(t, 0.3) / p : null; };
+  const n1 = [tail(eU, dU, pU), tail(eD, dD, pD)], n2 = [tail(fU, dU, pU), tail(fD, dD, pD)];
+  const noise = (n1[0] !== null && n1[1] !== null ? 0.5 * (n1[0] + n1[1]) : pct(raw, 0.3)) + 1e-9;
+  const noise2 = (n2[0] !== null && n2[1] !== null ? 0.5 * (n2[0] + n2[1]) : pct(raw2, 0.3)) + 1e-12;
+  const lU1 = envOf(x, LOW_UP), lD1 = envOf(x, LOW_DN), lU2 = envOf(x2, LOW_UP), lD2 = envOf(x2, LOW_DN);
+  const oD = dD + LOW_DN.off, qU = lU1[dU] + 1e-12, qD = lD1[oD] + 1e-12;
+  const tA = new Float64Array(nb), tB = new Float64Array(nb);
+  for (let i = 0; i < nb; i++) { tA[i] = lU1[dU + i] / qU + lD1[oD + i] / qD; tB[i] = lU2[dU + i] / qU + lD2[oD + i] / qD; }
+  return { raw, raw2, peak: 1, noise, noise2, d: dU, env: eU, env2: fU, nb, T, tA, tB };
+}
+
 async function loop(gen) {
   const binM = 0.03, binS = binM * 2 / C * SR;
   while (running && gen === loopGen) {
@@ -374,7 +435,8 @@ async function loop(gen) {
 function frame(binM, binS, t0) {
     // average fewer clicks while turning quickly (clicks at different headings shouldn't be mixed)
     const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? 1 : AVG;
-    const L = (avg + 1) * PERIOD;
+    const UD = !!PING_UP, np2 = Math.max(1, Math.ceil((avg + 1) / 2));      // alternating: fold whole up+down pairs
+    const L = UD ? np2 * 2 * PERIOD : (avg + 1) * PERIOD;
     const s = Native.sonarReadBoth(L), k = s.indexOf('|');
     const frames = +s.slice(0, k);
     if (frames === lastFrames) {   // recording not advancing
@@ -384,22 +446,31 @@ function frame(binM, binS, t0) {
     }
     lastFrames = frames; staleSince = 0;
     if (s.length > k + 1) {
-      const xr = b64ToF32(s.slice(k + 1)), np = avg + 1;
-      // fold all np recorded periods into one averaged period, then repeat it twice (circular correlation)
-      const x = new Float32Array(2 * PERIOD), x2 = new Float32Array(2 * PERIOD);
-      for (let i = 0; i < PERIOD; i++) {
-        let a = 0, b = 0; for (let j = 0; j < np; j++) { const ii = i + j * PERIOD; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
-        x[i] = x[i + PERIOD] = a / np; x2[i] = x2[i + PERIOD] = b / np;
+      const xr = b64ToF32(s.slice(k + 1)), np = UD ? np2 : avg + 1, PL = UD ? 2 * PERIOD : PERIOD;
+      // fold all np recorded loops (one click, or one up+down pair) into one, then repeat it twice (circular correlation)
+      const x = new Float32Array(2 * PL), x2 = new Float32Array(2 * PL);
+      for (let i = 0; i < PL; i++) {
+        let a = 0, b = 0; for (let j = 0; j < np; j++) { const ii = i + j * PL; a += xr[2 * ii]; b += xr[2 * ii + 1]; }
+        x[i] = x[i + PL] = a / np; x2[i] = x2[i + PL] = b / np;
       }
-      const { raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value);
-      const env2 = envOf(x2), raw2 = env2.subarray(d, d + raw.length);
-      // back-mic noise level, to tell whether the back mic actually heard an echo
-      const tail2 = env2.subarray(d + nb, d + PERIOD - T);
-      const noise2 = pct(tail2.length > 50 ? tail2 : raw2, 0.3) + 1e-12;
+      let raw, peak, noise, d, env, nb, T, env2, raw2, noise2, tA = null, tB = null;
+      if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
+      else {
+        ({ raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value));
+        env2 = envOf(x2); raw2 = env2.subarray(d, d + raw.length);
+        // back-mic noise level, to tell whether the back mic actually heard an echo
+        const tail2 = env2.subarray(d + nb, d + PERIOD - T);
+        noise2 = pct(tail2.length > 50 ? tail2 : raw2, 0.3) + 1e-12;
+      }
+      // speaker equalizer: after ~6 clicks of the flat sweep, measure and restart with the shaped sweep
+      if (UD && PINGS[$('ping').value].eq && !EQW && ++eqFrames >= 6 && !eqPending) {
+        EQW = measureEq(x.subarray(d, d + T)); eqPending = true;
+        setTimeout(() => { eqPending = false; if (running) { stop(); start(true); } }, 0);
+      }
       const o = JSON.parse(Native.orientation());
       // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
       // plus half the sweep length (centre of the sweep), counted back from the buffer end
-      const clickIdx = d + avg * PERIOD / 2 + T / 2;
+      const clickIdx = UD ? d + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + avg * PERIOD / 2 + T / 2;
       const ageMs = (L - clickIdx) / SR * 1000 + 40;             // + ~40 ms recording latency
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
@@ -411,8 +482,8 @@ function frame(binM, binS, t0) {
       const quietDir = /^quiet/.test($('ping').value);
       // envelopes used for the two-mic timing: the low part of the sweep if the ping has one (same start sample,
       // so the same indices), otherwise the full ones
-      let tA = raw, tB = raw2;
-      if (PING_LOW) { tA = envOf(x, PING_LOW).subarray(d, d + raw.length); tB = envOf(x2, PING_LOW).subarray(d, d + raw.length); }
+      if (!tA) { tA = raw; tB = raw2; }
+      if (!UD && PING_LOW) { tA = envOf(x, PING_LOW).subarray(d, d + raw.length); tB = envOf(x2, PING_LOW).subarray(d, d + raw.length); }
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
@@ -454,7 +525,7 @@ function frame(binM, binS, t0) {
       const nd = vals.length >= Math.min(2, nearHist.length) && vals.length ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
-      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`);
+      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`);
     }
 }
 
@@ -468,13 +539,26 @@ async function start(keep) {
   const f0 = P.f0 || 16000, f1 = P.f1 || 22000;
   PING = P.fill ? linChirp(SR, f0, f1, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), P.taper || 'hann') : P.sig;
   // low band = the first part of the linear sweep (frequency rises linearly from f0 to f1)
-  if (P.lowTo) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
+  if (P.lowTo && !P.updown) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
   else PING_LOW = null;
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
-  const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
-  for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
-  const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
+  if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
+  let play, loopLen = PERIOD;
+  if (P.updown) {
+    const n = Math.round(Math.max(480, Math.min(P.fill * PERIOD, PERIOD - needNb - 300)));
+    const w = (P.eq && EQW) || EQ_EDGES.slice(1).map(() => 1);
+    PING_UP = shapedSweep(n, EQ_EDGES, w, false, P.lowTo); PING_DN = shapedSweep(n, EQ_EDGES, w, true, P.lowTo);
+    LOW_UP = subTpl(PING_UP, PING_UP.lowOff, PING_UP.lowLen); LOW_DN = subTpl(PING_DN, PING_DN.lowOff, PING_DN.lowLen);
+    PING = PING_UP; PING_LOW = null; loopLen = 2 * PERIOD;
+    play = new Float32Array(2 * PERIOD);
+    for (let i = 0; i < n; i++) { play[i] = P.amp * vol * PING_UP.I[i]; play[PERIOD + i] = P.amp * vol * PING_DN.I[i]; }
+  } else {
+    PING_UP = PING_DN = LOW_UP = LOW_DN = null;
+    play = new Float32Array(PING.I.length);
+    for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
+  }
+  const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; try { Native.sonarRestoreVolume(); } catch (e) { } return; }
   running = true; lastFrames = -1; staleSince = 0;
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); }
@@ -488,7 +572,7 @@ function saveLog() {
   try {
     Native.newSession();
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
-      settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
+      settings: { eq: EQW && EQW.map(v => +v.toFixed(2)), rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
                   range: $('range').value, dirFilter: $('dirf').value },
       format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b, back-mic echo dB over its noise, mic shape match -1..1]; h = heading deg at click time; dl = direct-sound lag; avg = extra clicks folded', frames: sonarLog }));
   } catch (e) { }

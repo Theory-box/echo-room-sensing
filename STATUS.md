@@ -332,3 +332,11 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   does, so a long sweep is fine.
 - Synthetic check (wall 2 m ahead at +15 samples, 3 m behind at −15): distances 1.99/3.01 m, lags ±14.7, labels a/b.
   Open question for the phone: whether the low-band timing is consistent between clicks (Quiet's wasn't).
+- Back-burner (user, 2026-11-17): **trace echoes between the mics** (match each echo's arrivals across mics, and later
+  the third mic, to clean the data). Only after the current modes are polished.
+- **Full sweep now alternates up/down sweeps and self-equalizes** (2026-11-17). Loop = one up + one down sweep; each is
+  matched-filtered separately, normalized to its own direct sound and averaged (movement shifts the two in opposite
+  directions). At each Start, ~6 clicks of a flat sweep measure the received energy per 2 kHz band (bottom mic, includes
+  grip); the sweep then spends time ~1/|H| per band (half-way whitening, capped ×4 / ×0.25), and restarts automatically.
+  Weights are saved in the log ("eq"). Synthetic checks: distances/labels correct at 2, 8, 15 clicks/s; flat response →
+  only the ramped edge bands boosted; simulated weak highs → highs get up to ~2× more time.
