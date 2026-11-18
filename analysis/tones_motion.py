@@ -86,3 +86,18 @@ def motion_track_groups(x, gsize=16, nb=8, guard=1):
             ph = np.unwrap(np.angle(Pr[:, cand[i]])); out.append(-(ph - ph[0]) * C / (2 * np.pi * f) / 2)
     Mo = np.array(out)
     return (starts + P / 2) / SR, np.median(Mo, 0), Mo
+
+def motion_track_pilots(x, step=16, off=8, guard=1):
+    """pilot tones only (every `step`-th tone from `off`): a 16-tone hum inside the comb -> coarse profile, strongest
+    changing slots away from the direct sound, median of their unwrapped phase"""
+    starts = np.arange(0, len(x) - P, HOP); kk = K0 + off + step * np.arange(NT // step)
+    B = np.zeros((len(starts), len(kk)), complex)
+    for i, s in enumerate(starts):
+        B[i] = np.fft.fft(x[s:s + P])[kk] * np.exp(-2j * np.pi * kk * s / P)
+    n = len(kk); Mz = 64; w = np.hanning(n + 2)[1:-1]
+    d0 = int(np.argmax(np.abs(np.fft.ifft(B.mean(0) * w, Mz))))
+    Pr = np.fft.ifft((B - B.mean(0)) * w, Mz, axis=1)
+    cand = [m for m in range(Mz) if min((m - d0) % Mz, (d0 - m) % Mz) > 6]
+    fc = (kk.mean()) * SR / P
+    Mo = np.array([-(np.unwrap(np.angle(Pr[:, m])) - np.angle(Pr[0, m])) * C / (2 * np.pi * fc) / 2 for m in cand])
+    return (starts + P / 2) / SR, np.median(Mo, 0), Mo

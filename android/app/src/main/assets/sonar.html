@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -105,6 +105,10 @@ const PINGS = {
   // Echoes beyond HS_P samples (7.3 m) wrap around. The per-tone phase is continuous (the "hum"/hologram signal for
   // millimetre phone tracking) -- analysed offline from the raw recording for now.
   quiettones: { sig: null, amp: 0.9, tones: true, f0: 16000, f1: 22000, fc: 19000 },
+  // EXPERIMENT (2026-11-18): Quiet tones with HS_NPIL "pilot" tones (every 16th) HS_PILOT x louder -- strong enough
+  // to track the phone's millimetre movement from their phase (as the 16-tone hum did), the rest still build the map
+  // (pilots are divided out per tone, so the map's profile shape is unchanged; the other tones are a bit quieter).
+  quietpilots: { sig: null, amp: 0.9, tones: true, pilots: true, f0: 16000, f1: 22000, fc: 19000 },
 };
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
@@ -112,22 +116,41 @@ let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
 let HUM = false;
 // ---------- all-tone sonar ("Quiet tones") ----------
-const HS_P = 2048, HS_K0 = 683, HS_NT = 256, HS_J = 3, HS_M = 1024;   // tones k*SR/HS_P, k = 683..938 (16.0-22.0 kHz)
+const HS_P = 2048, HS_K0 = 683, HS_NT = 256, HS_J = 3, HS_M = 1024, HS_PILOT = 2, HS_PSTEP = 16, HS_POFF = 8;   // tones k*SR/HS_P, k = 683..938 (16.0-22.0 kHz)
 let HS = false, HS_X = null, HS_CI = 0;   // HS_X: played complex amplitude per tone (re, im)
-function toneLoop() {
+function toneLoop(pilots) {
   // amplitudes: flat, raised-cosine edges over 16 tones (down to 0.2); Schroeder phases -pi k^2 / N keep the peak low
   const a = new Float64Array(HS_NT), ph = new Float64Array(HS_NT), E = 16;
   for (let k = 0; k < HS_NT; k++) {
     const e = Math.min(k, HS_NT - 1 - k); a[k] = e >= E ? 1 : 0.2 + 0.8 * (0.5 - 0.5 * Math.cos(Math.PI * e / E));
     ph[k] = -Math.PI * k * k / HS_NT;
+    if (pilots && k % HS_PSTEP === HS_POFF) { a[k] *= HS_PILOT; const j = (k - HS_POFF) / HS_PSTEP; ph[k] = -Math.PI * j * j / (HS_NT / HS_PSTEP) + 0.3; }
   }
-  const x = new Float64Array(HS_P);
-  for (let k = 0; k < HS_NT; k++) { const w = 2 * Math.PI * (HS_K0 + k) / HS_P; for (let n = 0; n < HS_P; n++) x[n] += a[k] * Math.cos(w * n + ph[k]); }
+  // one period from the tone list (inverse FFT: exact, fast)
+  const synth = () => {
+    const re = new Float64Array(HS_P), im = new Float64Array(HS_P);
+    for (let k = 0; k < HS_NT; k++) { const b = HS_K0 + k, c = a[k] * HS_P / 2; re[b] = c * Math.cos(ph[k]); im[b] = c * Math.sin(ph[k]); re[HS_P - b] = re[b]; im[HS_P - b] = -im[b]; }
+    fft(re, im, true); return re;
+  };
+  let x = synth();
+  if (pilots) {
+    // louder pilots raise the peaks (and so force everything quieter): tame the peaks by clip-and-refilter -- clip at
+    // 1.6x rms, keep the phases the clipped signal implies, restore the intended amplitudes; repeat (standard peak
+    // reduction in OFDM transmitters). 2026-11-18 offline: map tones -1.8 dB vs plain Quiet tones (-3.3 without this).
+    for (let it = 0; it < 60; it++) {
+      let r = 0; for (const v of x) r += v * v; r = Math.sqrt(r / HS_P);
+      const re = Float64Array.from(x, v => Math.max(-1.6 * r, Math.min(1.6 * r, v))), im = new Float64Array(HS_P);
+      fft(re, im, false);
+      for (let k = 0; k < HS_NT; k++) ph[k] = Math.atan2(im[HS_K0 + k], re[HS_K0 + k]);
+      x = synth();
+    }
+  }
   let m = 0; for (const v of x) m = Math.max(m, Math.abs(v));
   const re = new Float64Array(HS_NT), im = new Float64Array(HS_NT);
   for (let k = 0; k < HS_NT; k++) { re[k] = a[k] / m * Math.cos(ph[k]) * HS_P / 2; im[k] = a[k] / m * Math.sin(ph[k]) * HS_P / 2; }
   let rms = 0; for (const v of x) rms += (v / m) * (v / m); rms = Math.sqrt(rms / HS_P);
-  return { x: Float32Array.from(x, v => v / m), X: { re, im }, crest: 1 / rms };
+  let pp = 0, pa = 0; for (let k = 0; k < HS_NT; k++) { pa += a[k] * a[k]; if (pilots && k % HS_PSTEP === HS_POFF) pp += a[k] * a[k]; }
+  return { x: Float32Array.from(x, v => v / m), X: { re, im }, crest: 1 / rms, rms, pilotShare: pp / pa, peakNorm: m };
 }
 // complex distance profile of one HS_P-sample stretch: tone by tone received / played, Hann across tones (low side
 // lobes, like Quiet's tapered sweep), inverse FFT -> HS_M points over one period (2 samples per point)
@@ -466,7 +489,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 quiet tones';
+const APP_BUILD = '2026-11-18 pilot tones';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -1284,9 +1307,9 @@ async function start(keep) {
     for (let i = 0; i < n; i++) { play[i] = P.amp * vol * PING_UP.I[i]; play[PERIOD + i] = P.amp * vol * PING_DN.I[i]; }
   } else if (P.tones) {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
-    const h = toneLoop(); HS_X = h.X; play = new Float32Array(HS_P); loopLen = HS_P; PERIOD = 2 * HS_P;   // a reading every ~85 ms
+    const h = toneLoop(!!P.pilots); HS_X = h.X; play = new Float32Array(HS_P); loopLen = HS_P; PERIOD = 2 * HS_P;   // a reading every ~85 ms
     for (let i = 0; i < HS_P; i++) play[i] = P.amp * vol * h.x[i];
-    logEv('tones', { n: HS_NT, k0: HS_K0, period: HS_P, crest: +h.crest.toFixed(2) });
+    logEv('tones', { n: HS_NT, k0: HS_K0, period: HS_P, crest: +h.crest.toFixed(2), pilots: P.pilots ? { step: HS_PSTEP, off: HS_POFF, gain: HS_PILOT, powerShare: +h.pilotShare.toFixed(3) } : null });
   } else {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     play = new Float32Array(PING.I.length);

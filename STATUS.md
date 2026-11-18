@@ -682,3 +682,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   16/32 neighbouring tones all gave scale 0.01–0.16 of the sensor (hum-only: 0.38–0.64) and correlation ≤ 0.6 at
   the edge of the lag range. The hum worked because 16 tones each carried much more power. Possible fix: a few
   stronger "pilot" tones inside the comb (as OFDM does for channel tracking), at some cost to the map.
+- **Build "pilot tones" (2026-11-18): ping "Quiet tones + pilots (experiment)"; Quiet tones unchanged.** Every 16th
+  of the 256 tones (16 pilots, 375 Hz apart) at 2× amplitude with their own staggered phases, then 60 rounds of
+  clip-and-refilter peak taming (OFDM practice). Measured in the app: crest 1.76 (plain 1.56), pilots 21 % of the
+  power, map tones −1.8 dB vs plain Quiet tones (−3.3 without peak taming; first try with the comb's own phases put
+  all pilots in step: −5…−11 dB), each pilot +4.3 dB over an ordinary tone. Pilots are divided out per tone, so the map
+  profile's shape is unchanged. Sim map: walls 16/16 found (plain tones 12/16), fewer stray crossings (1.2–1.3 vs
+  2.7–2.9 echoes per reading). Motion from the pilots: analysis ready (analysis/tones_motion.py, motion_track_pilots);
+  needs a real recording.
