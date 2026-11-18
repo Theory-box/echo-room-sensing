@@ -403,3 +403,12 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   failed 25 cm/s completely and partly −15. The exact real symptom wasn't reproduced in simulation → needs a real retest.
 - Click rate: wrap quantum = λ/2 per click → lower rates make speed MORE ambiguous (Quiet 3.6 cm/s at 4/s, 13.5 at 15/s;
   Full sweep low part 14 at 4/s, 54 at 15/s). Use 15/s for motion work.
+- **Second real speed test (2026-11-17 22:03, Quiet 15/s, 77 s):** still snapped to multiples of 13.5 cm/s. Root cause
+  (= standards item 1): the app folded RAW clicks before the matched filter, so an echo survived only if it moved a
+  whole wavelength-step between clicks (0, 13.5, 27 cm/s…) — a stroboscopic filter on what gets detected at all.
+- **Fix: non-coherent averaging.** Each click is compressed separately (complex correlation in one FFT pass, template
+  spectrum cached) for both mics (and the low band for Full sweep), and the ENVELOPES are averaged. The fold is kept only
+  for the direct sound (time zero) and the mic self-check. Fast turning now keeps 2 clicks (was 1) so speeds still work.
+  Simulation (Quiet 15/s, moving wall): detected in 46/46 frames at 0, 6.75, 10, −20 cm/s (old: 46, 6, 34, 28 of 46) with
+  correct speeds; Full sweep 30 cm/s and Strong fine. Cost: noise averages less than with the coherent fold (static
+  echoes may be ~2–3 dB weaker in noise-limited cases). Needs a real retest.

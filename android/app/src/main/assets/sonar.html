@@ -383,16 +383,30 @@ function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' :
 // Result per echo: q.v (m/s, + = getting closer) and q.vq (0..1, how consistent the phase steps were).
 // Uses the low part of the Full sweep (2-8 kHz, fc 5 kHz: one phase turn = 3.4 cm) or the whole ping otherwise.
 let MN_TPL = null, MN_FC = 0, MN_TRACKS = [];   // tracks: recent per-echo speeds, to pick the right phase turn
-function clickC(xr, start, len, tpl) {     // complex matched-filter output of ONE click on mic 1, delays 0..len-1
-  const n = len + tpl.I.length, seg = new Float32Array(n);
-  for (let i = 0; i < n; i++) seg[i] = xr[2 * (start + i)] || 0;
-  return { re: xcorr(seg, tpl.I), im: xcorr(seg, tpl.Q) };
+// re + j*im = sum_n x[n+k] * (I[n] + j*Q[n]) for k = 0..len-1, i.e. xcorr(x, I) + j*xcorr(x, Q) in 3 FFTs instead of 6;
+// the template spectrum is cached per FFT size.
+const tplFFT = new WeakMap();
+function cxcorr(x, tpl, len) {
+  let N = 1; while (N < x.length + tpl.I.length) N <<= 1;
+  let c = tplFFT.get(tpl);
+  if (!c || c.N !== N) {
+    const br = new Float64Array(N), bi = new Float64Array(N); br.set(tpl.I);
+    for (let i = 0; i < tpl.Q.length; i++) bi[i] = -tpl.Q[i];
+    fft(br, bi, false); c = { N, br, bi }; tplFFT.set(tpl, c);
+  }
+  const ar = new Float64Array(N), ai = new Float64Array(N); ar.set(x); fft(ar, ai, false);
+  for (let i = 0; i < N; i++) { const r = ar[i] * c.br[i] + ai[i] * c.bi[i], m = ai[i] * c.br[i] - ar[i] * c.bi[i]; ar[i] = r; ai[i] = m; }
+  fft(ar, ai, true);
+  return { re: ar.subarray(0, len), im: ai.subarray(0, len) };
 }
-function echoMotion(xr, L, d, kept, nb) {
-  if (!MN_TPL || !kept.length) return 0;
-  const T = MN_TPL.I.length, J = Math.floor((L - d - nb - T) / PERIOD) + 1;   // complete clicks in this reading
-  if (J < 2) return J;
-  const cs = []; for (let j = 0; j < J; j++) cs.push(clickC(xr, d + j * PERIOD, nb, MN_TPL));
+function clickC(xr, start, len, tpl, ch = 0) {   // complex matched-filter output of ONE click, delays 0..len-1
+  const n = len + tpl.I.length, seg = new Float32Array(n);
+  for (let i = 0; i < n; i++) seg[i] = xr[2 * (start + i) + ch] || 0;
+  return cxcorr(seg, tpl, len);
+}
+function echoMotion(cs, kept, nb) {     // cs = per-click complex outputs (mic 1, MN_TPL) of the clicks in this reading
+  const J = cs ? cs.length : 0;
+  if (!MN_TPL || !kept.length || J < 2) return J;
   const dt = PERIOD / SR;
   // per click: integer envelope peak k0 near the echo, and the phase there. At the peak the phase only reflects the
   // fractional part of the delay (one carrier period = SR/fc samples per 2*pi), so tau_j = k0 + MN_SIGN*phase*Pc/(2*pi)
@@ -512,7 +526,7 @@ async function loop(gen) {
 }
 function frame(binM, binS, t0) {
     // average fewer clicks while turning quickly (clicks at different headings shouldn't be mixed)
-    const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? 1 : AVG;
+    const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? Math.min(2, AVG) : AVG;   // fewer clicks when turning fast (heading smear); >= 2 keeps the speed measurement
     const UD = !!PING_UP, np2 = Math.max(1, Math.ceil((avg + 1) / 2));      // alternating: fold whole up+down pairs
     const L = UD ? np2 * 2 * PERIOD : (avg + 1) * PERIOD;
     const s = Native.sonarReadBoth(L), k = s.indexOf('|');
@@ -540,6 +554,34 @@ function frame(binM, binS, t0) {
         const tail2 = env2.subarray(d + nb, d + PERIOD - T);
         noise2 = pct(tail2.length > 50 ? tail2 : raw2, 0.3) + 1e-12;
       }
+      // NON-COHERENT averaging (radar standard): compress each click on its own and average the ENVELOPES. Averaging raw
+      // clicks first (the fold) cancels echoes that move a fraction of a wavelength between clicks (Quiet: ~0.9 cm), so
+      // while moving only echoes at 0 / 13.5 / 27 cm/s... survived (2026-11-17 logs). The fold is still used to find the
+      // direct sound (time zero) and for the mic self-check: it doesn't move relative to the phone.
+      let mnCs = null;
+      if (!UD) {
+        const len = PERIOD - T, J = Math.floor((L - d - PERIOD) / PERIOD) + 1;   // clicks whose full period is recorded
+        if (J >= 1) {
+          const e1 = new Float64Array(len), e2 = new Float64Array(len), c1s = [];
+          let pk = 0;
+          for (let j = 0; j < J; j++) {
+            const st = d + j * PERIOD, a = clickC(xr, st, len, PING, 0), b = clickC(xr, st, len, PING, 1);
+            for (let i = 0; i < len; i++) { e1[i] += Math.hypot(a.re[i], a.im[i]) / J; e2[i] += Math.hypot(b.re[i], b.im[i]) / J; }
+            pk += Math.hypot(a.re[0], a.im[0]) / J; c1s.push(a);
+            if (PING_LOW) {
+              const la = clickC(xr, st, nb, PING_LOW, 0), lb = clickC(xr, st, nb, PING_LOW, 1);
+              if (!tA) { tA = new Float64Array(nb); tB = new Float64Array(nb); }
+              for (let i = 0; i < nb; i++) { tA[i] += Math.hypot(la.re[i], la.im[i]); tB[i] += Math.hypot(lb.re[i], lb.im[i]); }
+              if (MN_TPL === PING_LOW) (mnCs = mnCs || []).push(la);
+            }
+          }
+          raw = e1.subarray(0, nb); raw2 = e2.subarray(0, nb); peak = Math.max(pk, e1[0]) + 1e-12;
+          const t1 = e1.subarray(nb), t2 = e2.subarray(nb);
+          noise = (t1.length > 50 ? pct(t1, 0.3) : pct(raw, 0.3)) / peak + 1e-9;
+          noise2 = pct(t2.length > 50 ? t2 : raw2, 0.3) + 1e-12;
+          if (MN_TPL === PING) mnCs = c1s;
+        }
+      }
       // speaker equalizer: after ~6 clicks of the flat sweep, measure and restart with the shaped sweep
       if (UD && PINGS[$('ping').value].eq && !EQW && ++eqFrames >= 6 && !eqPending) {
         EQW = measureEq(x.subarray(d, d + T)); eqPending = true; logEv('eq', { w: EQW.map(v => +v.toFixed(2)) });
@@ -560,8 +602,8 @@ function frame(binM, binS, t0) {
       const quietDir = /^quiet/.test($('ping').value);
       // envelopes used for the two-mic timing: the low part of the sweep if the ping has one (same start sample,
       // so the same indices), otherwise the full ones
+      if (!UD && PING_LOW && !tA) { tA = envOf(x, PING_LOW).subarray(d, d + raw.length); tB = envOf(x2, PING_LOW).subarray(d, d + raw.length); }
       if (!tA) { tA = raw; tB = raw2; }
-      if (!UD && PING_LOW) { tA = envOf(x, PING_LOW).subarray(d, d + raw.length); tB = envOf(x2, PING_LOW).subarray(d, d + raw.length); }
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
@@ -580,7 +622,7 @@ function frame(binM, binS, t0) {
         q.lagOK = !quietDir && q.heard2 >= 3.2 && Math.abs(q.lag) <= MIC_LAG + 2 && q.match >= 0.6;
         q.dir = quietDir ? '?' : q.lagOK ? classify(q.cos) : 'side';
       }
-      const mnClicks = UD ? 0 : echoMotion(xr, L, d, kept, nb);   // approach speed per echo (logged; not displayed yet)
+      const mnClicks = UD ? 0 : echoMotion(mnCs, kept, nb);   // approach speed per echo (logged; not displayed yet)
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
         // Full: confirmed-ahead bright, unsure (side) and behind dimmed. Clean: confirmed-ahead only.
