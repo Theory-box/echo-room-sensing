@@ -545,3 +545,21 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   acceleration-based velocity (tilt error leaking gravity during rotation: 1° ≈ 0.17 m/s²). Wall-distance
   repeatability across regions: median 3 cm before and after "fine distance" (different rooms) — the 1.5 cm rounding
   was not the dominant real error.
+- **Controlled wall test (2026-11-18 11:52, Quiet long 15/s, High; one 56 s recording: wall ahead ~0.9 m, ~24 s still,
+  then ~30 s of forward/back pushes at ~0.6–0.7 Hz; no "wall behind" part). Raw audio = last 20 s (pushing).**
+  - Log: still, the wall echo distance spreads 9.4 cm (5–95 %, sd 3 cm) although consecutive readings change only
+    0.3 cm. The wall is a broad hump 0.87–0.96 m (−3 dB; expected mainlobe ~3 cm) with 2–3 components ~4–6 cm apart.
+  - Phone velocity from the accelerometer during pushes: same frequency as the echo (0.61 Hz), right sign and timing
+    within ~0.2 s (sensor leads 221 ms), amplitude 0.56× the echo-implied speed → calibratable.
+  - Raw audio, single clicks: wall echo 25 dB over noise (not noise-limited), yet click-to-click distance jumps ~3 cm
+    (loudest point, −6 dB front edge and hump centre alike) and the hump shape correlates only 0.5 between
+    consecutive clicks → speckle: overlapping reflections re-mix with mm motion at λ 1.8 cm. 1 s averages still wander
+    86–95 cm. Carrier-phase tracking moves only 0.2 cm/click but loses track when the dominant component switches.
+  - Two-mic timing of the wall straight ahead: lag spread −20…+21 samples (40 % ≥ +10, 26 % ≤ −10) with envelope shape
+    match 0.96 — broad smooth humps correlate well at many lags, and the mics (14 cm = 8 λ) hear different speckle.
+    Direct-sound lag is stable at 7–10 samples (recording fine). Loudness difference back−bottom: −24 dB for this
+    wall vs −13…−18 for others, but in the free-sweep session walls ahead/behind gave −15.0 / −14.6 dB → no cue.
+  - Offline frequency compounding (split the sweep into K pitch bands = time pieces, sum band envelopes in power):
+    leftover jitter after removing the push sinusoid 3.9 cm (app: full band, 3 clicks) → 1.8–2.0 cm (K=2) →
+    1.55 cm (K=4, hump centre, 3 clicks). Cost: coarser resolution (K=4 → ~11 cm). Scripts: analysis/raw_wall_test.py,
+    analysis/raw_compounding.py. One recording, one wall — needs confirming.
