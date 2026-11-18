@@ -313,3 +313,13 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   also stops the native side; headphones/Bluetooth connected mid-session stop the sonar (it previously only checked at
   start); record thread catches errors, can't write into a newer session's buffer; base64 encoding moved out of the lock.
 - Not changed (minor/by design): display lags the turn by ~0.2–0.5 s; dead landscape CSS; background JS polling.
+- **Follow-up from the user's post-fix session (2026-11-17, Quiet (long), 8 clicks/s):** still 27% impossible lags, and
+  the lag of the same echo at the same heading (±3°, frames ≥5 apart so no shared clicks) differs by a median of ~14
+  samples (random over ±26 would be ~17). An older Mid session (2026-11-14) gave ~6.6. Consecutive frames looked
+  repeatable only because they share folded clicks. Conclusion: at 16–22 kHz the two mics (14 cm ≫ 1.7 cm wavelength)
+  hear different mixtures of reflections, so per-click timing carries almost no direction there. Direct-sound lag was
+  tight (median 4, IQR 2.8–5.2) → channels are aligned; not a capture bug.
+- Change: in Quiet (long) the timing is no longer used — echoes are direction-unknown ('?' in logs), painted normally,
+  the distance readout uses all echoes, "Clean (ahead only)" isn't offered, the mic check isn't shown, and the Map uses
+  the beam + turning only. Strong/Mid keep the checked timing. Implication for the third mic: in Quiet use its loudness
+  (body shadow), not timing.

@@ -36,7 +36,7 @@
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
-  <div class="mut" style="text-align:center">distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity</div>
+  <div class="mut" style="text-align:center" id="aslegend">distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity</div>
   <div id="dist">–</div>
   <div class="mut" style="text-align:center">nearest echo ahead</div>
   <div id="bar"><div></div></div>
@@ -401,7 +401,8 @@ function frame(binM, binS, t0) {
       const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, isNaN(+$('sens').value) ? $('sens').value : +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
-      const directLag = micLag(env, env2, d, 10, 26).lag;   // full window around the click (not one-sided)
+      const directLag = micLag(env, env2, d, 10, 26).lag;
+      const quietDir = /^quiet/.test($('ping').value);   // full window around the click (not one-sided)
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
@@ -412,16 +413,19 @@ function frame(binM, binS, t0) {
         q.heard2 = p2 / noise2;                                   // back-mic echo strength over its own noise
         // trust the timing only if the back mic heard it (>= ~10 dB), the lag is physically possible (|lag| <= mic
         // spacing + 2 samples) and the two mics' echo shapes match; otherwise direction unknown -> unsure
-        q.lagOK = q.heard2 >= 3.2 && Math.abs(q.lag) <= MIC_LAG + 2 && q.match >= 0.6;
-        q.dir = q.lagOK ? classify(q.cos) : 'side';
+        // Quiet (long), 16-22 kHz: the user's logs (2026-11-17) show the two-mic lag of the same echo at the same heading
+        // changes by ~14 samples between independent clicks (random would be ~17): at 1.7 cm wavelength the two mics
+        // 14 cm apart hear different mixtures of reflections. So there the timing isn't used: direction unknown ('?').
+        q.lagOK = !quietDir && q.heard2 >= 3.2 && Math.abs(q.lag) <= MIC_LAG + 2 && q.match >= 0.6;
+        q.dir = quietDir ? '?' : q.lagOK ? classify(q.cos) : 'side';
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
         // Full: confirmed-ahead bright, unsure (side) and behind dimmed. Clean: confirmed-ahead only.
-        const f = q.dir === 'ahead' ? 1 : $('dirf').value === 'clean' ? 0 : q.dir === 'side' ? 0.4 : 0.25;
+        const f = q.dir === 'ahead' || q.dir === '?' ? 1 : $('dirf').value === 'clean' ? 0 : q.dir === 'side' ? 0.4 : 0.25;
         for (let dd = -1; dd <= 1; dd++) { const i = q.b + dd; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], f * tp.prof[i]); }
       }
-      const front = kept.filter(q => q.dir === 'ahead');   // distance readout: confirmed-ahead echoes only
+      const front = kept.filter(q => q.dir === 'ahead' || q.dir === '?');   // distance readout: confirmed-ahead (or, in Quiet, any) echoes
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
         avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2)]) });
@@ -439,7 +443,7 @@ function frame(binM, binS, t0) {
       const nd = vals.length >= Math.min(2, nearHist.length) && vals.length ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
-      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`;
+      $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`);
     }
 }
 
@@ -487,7 +491,7 @@ $('range').onchange = () => { clearAcc(); if (running && $('ping').value === 'qu
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
 function showViewHelp() { $('howmap').style.display = $('dirf').value === 'map' ? '' : 'none'; }
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
-$('ping').onchange = () => { buildSens($('sens').value); saveSettings(); if (running) { stop(); start(true); } };
+$('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(true); } };
@@ -502,6 +506,15 @@ matchMedia('(orientation: landscape)').addEventListener('change', placeButtons);
 // Remember settings between visits (per-device convenience; falls back silently if storage is unavailable).
 // Sensitivity choices depend on the ping: Quiet (long) uses an adaptive threshold (Low/Med/High shift it);
 // Strong/Mid use the fixed thresholds you tested, with "Adaptive (test)" to force the adaptive one.
+function buildView(keep) {
+  const quiet = /^quiet/.test($('ping').value), sel = $('dirf');
+  const opts = [['full', quiet ? 'Radar' : 'Full (dim = unsure)']].concat(quiet ? [] : [['clean', 'Clean (ahead only)']],
+               [['map', 'Map (keeps echoes, cleans up as you turn)']]);
+  sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  sel.value = opts.some(o => o[0] === keep) ? keep : 'full';
+  $('aslegend').textContent = quiet ? 'distance graph: echo strength vs distance (in Quiet the mics cannot tell direction, turning does); dashed line = sensitivity'
+    : 'distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity';
+}
 function buildSens(keep) {
   const quiet = /^quiet/.test($('ping').value), sel = $('sens');
   const opts = quiet ? [['auto', 'Auto'], ['-34', 'Low'], ['-38', 'Medium'], ['-42', 'High']]
@@ -513,12 +526,13 @@ const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol'];
 let savedSt = {};
 try { savedSt = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); } catch (e) { }
 for (const k of SAVED) {
-  if (savedSt[k] === undefined || k === 'sens') continue;
+  if (savedSt[k] === undefined || k === 'sens' || k === 'dirf') continue;
   $(k).value = savedSt[k];
   if ($(k).tagName === 'SELECT' && $(k).selectedIndex < 0)   // stale saved value (option removed): use the default
     $(k).value = [...$(k).options].find(o => o.defaultSelected)?.value || $(k).options[0].value;
 }
 buildSens(savedSt.sens);
+buildView(savedSt.dirf);
 $('volv').textContent = $('vol').value + '%';
 function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings2', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
