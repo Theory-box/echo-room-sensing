@@ -144,7 +144,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             recOrNull = rec;
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
             synchronized (ringLock) {
-                ringCap = sr * 2;
+                ringCap = sr * 20;    // 20 s: the live view reads the last ~0.5 s; the rest is kept for saveSessionRaw
                 ring = new float[ringCap * 2];
                 ringFrames = 0;
             }
@@ -655,6 +655,32 @@ public class MainActivity extends Activity implements SensorEventListener {
             try (FileOutputStream f = new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName))) {
                 f.write(text.getBytes(StandardCharsets.UTF_8));
                 return sessionDir + "/" + fileName;
+            } catch (IOException e) {
+                return "save failed: " + e;
+            }
+        }
+
+        /** Last `seconds` of the sonar recording (both mics) as a 32-bit float stereo WAV in the session folder.
+         *  Returns "file|endFrame|frames": endFrame = recording sample counter at the last sample (as sonarReadBoth). */
+        @JavascriptInterface public String saveSessionRaw(String fileName, int seconds) {
+            if (sessionDir == null) return "no session";
+            float[] out; long end; int n;
+            synchronized (ringLock) {
+                if (ring == null || ringFrames == 0) return "no recording";
+                n = (int) Math.min(Math.min(ringFrames, ringCap), (long) seconds * 48000);
+                end = ringFrames; out = new float[n * 2];
+                for (int i = 0; i < n; i++) { int pos = (int) ((end - n + i) % ringCap); out[2 * i] = ring[2 * pos]; out[2 * i + 1] = ring[2 * pos + 1]; }
+            }
+            int dataBytes = out.length * 4;
+            ByteBuffer bb = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN);
+            bb.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataBytes).put("WAVE".getBytes(StandardCharsets.US_ASCII));
+            bb.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 3).putShort((short) 2).putInt(48000)
+              .putInt(48000 * 2 * 4).putShort((short) 8).putShort((short) 32);
+            bb.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataBytes);
+            for (float v : out) bb.putFloat(v);
+            try (FileOutputStream f = new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName))) {
+                f.write(bb.array());
+                return fileName + "|" + end + "|" + n;
             } catch (IOException e) {
                 return "save failed: " + e;
             }

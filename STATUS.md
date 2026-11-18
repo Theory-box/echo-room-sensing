@@ -496,3 +496,29 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   −99 (~0.7 KB/frame, ~0.6 MB/min at 15/s). Purpose: judge an adaptive threshold (CA/OS-CFAR against local
   reverberation) offline against the tracker's confirmed echoes before building it. Sim: present in every frame,
   wall results unchanged (47/48, median 2.6°).
+
+## Foundation review (2026-11-18)
+Baselines from the real logs (since 2026-11-17 21:55):
+- Distances were the CENTRE of a 3 cm step (every logged value on the grid) → up to ±1.5 cm (0.87 cm rms) before any
+  other error; a still echo never changed step.
+- Two-mic lag of echoes (Strong/Full sweep, back mic heard > 10 dB): almost flat over −24…+24 samples; class flips
+  between consecutive readings of the same track 17 %; even the direct sound's own lag (should be constant) spreads
+  8–23 samples (10–90 %). Front/back as built is close to uninformative. Quiet doesn't use it at all.
+- Real beam (Quiet, 142 accepted walls): a wall faced squarely is detected in 48 % of readings, 24 % at ±20°,
+  ~10 % beyond ±40° (clutter at the same distance).
+Independent code audit (synthetic checks with the app's own functions) — bugs:
+1. Linear-sweep range–Doppler error v·fc·T/B: Quiet long 4 cm per 10 cm/s at 4/s, 1.2 cm at 15/s; approaching = closer.
+2. Distance at the bin centre although the peak sample is known.
+3. removeStatic memory is ~25 CLICKS (1.7 s at 15/s, 6 s at 4/s, 12 s at 2/s) → ghosts of near objects after turning.
+4. micLag window ±18 samples too wide for Strong/Full (a −3 dB echo 12 samples away flips ahead → side).
+5. Full-sweep low-band timing envelopes skip the near-zone background removal; low-band template ends abruptly.
+6. Noise gate 3× noise: passes 4 % of noise at 1 click/reading, costs 1.6 dB at 3.
+7. Possible phantom at R + ~0.25 m (wall → body → phone), unchecked.
+Literature (BatMapper, MobiSys'17): 1–2 cm (80th pct) to large perpendicular walls at 0.5–3.5 m with the same
+matched-filter + envelope approach; two collinear mics give only the angle to the phone's axis (a cone) — every
+published fix for the mirror ambiguity moves the device (rotation/slide = synthetic array) or adds a sensor.
+- **Build "fine distance":** distance from the peak refined between samples (parabola) + the sweep's motion error
+  corrected with the echo's phase-measured approach speed (capped ±15 cm; logged as e[12]); distances logged to 1 mm;
+  every frame logs `fr` (recording sample counter); on Stop the last 20 s of both mics are saved as raw_audio.wav
+  (float32 stereo) next to the log (ring buffer 2 s → 20 s). Sim (all pings × rates): echo distance error median
+  0.1–0.8 cm, 90 % ≤ 1.7 cm; walls unchanged (47/48, median 2.6°). Not yet tested on the phone.

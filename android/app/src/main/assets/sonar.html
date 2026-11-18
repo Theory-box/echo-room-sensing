@@ -74,9 +74,9 @@ let PERIOD = 3200;                                        // samples between cli
 // Ping options. "Strong" uses the band the phone speaker handles well (audible ticks); "Quiet" is near-ultrasonic
 // but the speaker is weak there, so far fewer echoes clear the noise.
 const PINGS = {
-  strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9, fc: 7000 },
-  mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9, fc: 12000 },   // louder than ultrasonic, narrower beam than strong
-  quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9 },
+  strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9, fc: 7000, f0: 2000, f1: 12000 },
+  mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9, fc: 12000, f0: 8000, f1: 16000 },   // louder than ultrasonic, narrower beam than strong
+  quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9, f0: 16000, f1: 22000 },
   // experiment: same band, but the sweep fills half of each click period (more energy -> more faint echoes);
   // built in start() because its length depends on the click rate
   quietlong: { sig: null, amp: 0.9, fill: 0.5, fc: 19000 },
@@ -90,6 +90,8 @@ const PINGS = {
   wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
 };
 let PING = PINGS.strong.sig;
+// sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
+let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 let PING_LOW = null;   // low-band part of the sweep (start of it) for the two-mic timing, or null = use the whole ping
 let AVG = 3;     // consecutive clicks averaged before matched filtering (fewer when clicking slowly)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -349,7 +351,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 raw profile';
+const APP_BUILD = '2026-11-18 fine distance';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value });
@@ -884,6 +886,20 @@ function frame(binM, binS, t0) {
         q.dir = quietDir ? '?' : q.lagOK ? classify(q.cos) : 'side';
       }
       const mnClicks = UD ? 0 : echoMotion(mnCs, kept, nb);   // approach speed per echo (logged; not displayed yet)
+      // Exact distance: the peak between samples (parabola through the top 3 samples, ~1 mm) instead of the middle of
+      // its 3 cm step. Then the sweep's motion error: with a linear sweep, an echo whose distance is changing comes back
+      // shifted in pitch, which the matched filter reads as a shift in time -- it shows closer by v*fc*T/B when approaching
+      // (Quiet long at 4/s: ~4 cm per 10 cm/s; 15/s: ~1 cm). Corrected with the echo's measured approach speed when that
+      // came from the phase (reliable), capped at +-15 cm.
+      for (const q of kept) {
+        const i = q.i0;
+        let fine = i;
+        if (i > 0 && i < raw.length - 1) { const y0 = raw[i - 1], y1 = raw[i], y2 = raw[i + 1], dd = y0 - 2 * y1 + y2; if (dd < 0) fine = i + Math.max(-0.5, Math.min(0.5, 0.5 * (y0 - y2) / dd)); }
+        q.rBin = q.r; q.r = fine * C / (2 * SR);
+        q.dc = 0;
+        if (q.v != null && (q.vsrc === 'p' || q.vsrc === 't')) q.dc = Math.max(-0.15, Math.min(0.15, q.v * PING_FC * PING_T / PING_B));
+        q.r += q.dc;
+      }
       // radar and distance readout use CONFIRMED tracks (raw detections go to the Map, the distance graph and the log)
       const shown = trackEchoes(kept, performance.now(), UD ? 1 : clickJ);
       const prof = new Float32Array(tp.prof.length);
@@ -901,9 +917,9 @@ function frame(binM, binS, t0) {
         avg, pk: +(20 * Math.log10(peak + 1e-12)).toFixed(1), nz: +(20 * Math.log10(noise)).toFixed(1), thr: +lastThr.toFixed(1),
         gy: +gyroMax(PERIOD / SR * 1000 * (avg + 1)).toFixed(2), tilt: [+(Math.asin(Math.max(-1, Math.min(1, g[1] / gn))) * 180 / Math.PI).toFixed(0),
         +(Math.asin(Math.max(-1, Math.min(1, g[0] / gn))) * 180 / Math.PI).toFixed(0)], ms: Math.round(performance.now() - t0),
-        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
+        e: kept.map(q => [+q.r.toFixed(3), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
           q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null,
-          q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1)]), mn: mnClicks,
+          q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1), +(100 * q.dc).toFixed(1)]), mn: mnClicks, fr: frames,
         nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]), p: tp.rawDb });
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
@@ -940,6 +956,7 @@ async function start(keep) {
   // low band = the first part of the linear sweep (frequency rises linearly from f0 to f1)
   if (P.lowTo && !P.updown) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
   else PING_LOW = null;
+  PING_FC = (f0 + f1) / 2; PING_T = PING.I.length / SR; PING_B = f1 - f0;
   MN_TPL = P.lowTo ? PING_LOW : PING; MN_FC = P.lowTo ? (f0 + P.lowTo) / 2 : (P.fc || (f0 + f1) / 2);
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
@@ -973,11 +990,14 @@ function saveLog(partial) {
   let ok = false;
   try {
     Native.newSession();
+    // last 20 s of both mics as a 32-bit float WAV (ch1 bottom, ch2 back), for checking the processing offline
+    let rawInfo = null;
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 20); } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
-      events: sonarEvents, frames: sonarLog }));
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance]; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
   if (!ok) {   // keep the data (it will be retried at the next save); trim only if it grows very large
