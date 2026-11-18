@@ -340,3 +340,13 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   grip); the sweep then spends time ~1/|H| per band (half-way whitening, capped ×4 / ×0.25), and restarts automatically.
   Weights are saved in the log ("eq"). Synthetic checks: distances/labels correct at 2, 8, 15 clicks/s; flat response →
   only the ramped edge bands boosted; simulated weak highs → highs get up to ~2× more time.
+- **Reverted (same day) after the user saw worse results + two audits:** Full sweep is back to a single flat linear
+  up-sweep (+ low-band two-mic timing). Findings: (1) independent audit, simulated: a DOWN-sweep moves the speaker's
+  harmonic distortion to after the direct sound (k-th harmonic lag ≈ (k−1)(f1/rate − t)), smeared ~2–12 m and timed like
+  the direct sound → false far "ahead" echoes; up-sweeps put it before the direct sound (standard in swept-sine
+  measurement, Farina). (2) Equalizer: the measured weights spread 16:1 (speaker very weak >16 kHz at the bottom mic);
+  any rebalancing cost 2–8 dB of echo energy here, and stepped band weights raised range sidelobes; its edge bands were
+  also over-boosted ×1.6 by the taper. (3) clickIdx in the pair path fixed (d % PERIOD). Code kept behind flags
+  (updown / eq), off. The user's log of the eq version: weights [2.22,1,.86,.25,.25,.25,.75,4,4,4], 48% of echoes >3 m.
+- Back-burner: two speakers (bottom + earpiece) with separable signals (MIMO): ~doubles the ahead/behind baseline, no
+  left/right, not for Quiet; earpiece weak.

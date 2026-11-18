@@ -79,9 +79,11 @@ const PINGS = {
   // test: one long sweep over everything the speaker/mics do (2-22 kHz). Distance from the whole band (~3x sharper
   // than Quiet's 6 kHz); two-mic timing from its 2-8 kHz part only (longer wavelengths -> the mics agree better).
   // Gentle 10% edge ramps instead of Hann, so the low start of the sweep isn't faded out.
-  // Clicks alternate up-sweeps and down-sweeps (movement shifts their distances in opposite directions, so the
-  // average stays put), and the sweep spends more time in the pitches this phone plays weakly ("eq", measured at Start).
-  wide: { sig: null, amp: 0.9, fill: 0.5, lowTo: 8000, updown: true, eq: true },
+  // Single linear UP-sweep, equal time per pitch. Tried and dropped (2026-11-17): alternating up/down sweeps -- a
+  // down-sweep puts the speaker's harmonic distortion AFTER the direct sound (false far echoes "ahead"; with up-sweeps
+  // it lands before it, outside the echo window); and a speaker equalizer -- cost 2-8 dB of echo strength on this
+  // phone and stepped band weights raised range sidelobes. The code for both remains (flags updown / eq).
+  wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
 };
 let PING = PINGS.strong.sig;
 let PING_LOW = null;   // low-band part of the sweep (start of it) for the two-mic timing, or null = use the whole ping
@@ -470,7 +472,7 @@ function frame(binM, binS, t0) {
       const o = JSON.parse(Native.orientation());
       // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
       // plus half the sweep length (centre of the sweep), counted back from the buffer end
-      const clickIdx = UD ? d + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + avg * PERIOD / 2 + T / 2;
+      const clickIdx = UD ? d % PERIOD + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + avg * PERIOD / 2 + T / 2;
       const ageMs = (L - clickIdx) / SR * 1000 + 40;             // + ~40 ms recording latency
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
