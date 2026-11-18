@@ -736,3 +736,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   block. Structural fix to try: make the map cycle 1920 samples (25 Hz apart, wrap at 6.9 m) so the proven 250 Hz hum
   (192-sample blocks, 82–93 % in sim) fits exactly, plus a band filter/taper against map-tone leakage. Note: a second
   speaker would NOT avoid the frequency separation (the mic hears both speakers); it only avoids sharing power.
+- **Hum band, structural fix works in simulation (2026-11-18).** Map cycle 1920 samples (25 Hz grid, wrap 6.9 m);
+  8 hum tones 15.25–17.0 kHz, 250 Hz apart (the proven hum spacing; whole cycles every 192 samples) at 3× amplitude;
+  map tones 17.75–22 kHz; peak taming. Hum read with Hann windows of 384 samples (two 250 Hz cycles: neighbouring hum
+  tones on the window's zeros, map tones ≥ 6 bins away), hop 192, coarse slot profile, median over slots. Known 25 cm
+  move WITH the map tones playing: 24.8 / 25.0 / 25.0 / 23.9 cm at peak 6 / 12 / 25 / 50 cm/s (pilots: 20.9 / 10.3 /
+  1.7 / 1.6). Keeping the 2048 cycle (hum 187.5 or 375 Hz apart, 2-cycle Hann windows) degrades at speed (12.9–17.0 cm
+  at 25–50 cm/s). Costs: hum takes ~32 % of the power, map tones −1.4 dB each and the map band 17.75–22 kHz (~4 cm detail
+  instead of ~3) → map energy ≈ −3 dB vs Quiet tones; 1920 isn't a power of two (the app needs a radix-2/3/5 FFT).
+  Not built yet.
