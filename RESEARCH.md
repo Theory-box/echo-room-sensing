@@ -84,3 +84,38 @@ room-geometry inference from simulated data, or narrow phone sensing tasks (auth
 - (An earlier quick analysis wrongly put ch3 next to the bottom mic — it picked a weak click.)
 - Conclusion: the third mic gives a thin triangle (~14 cm × ~1.5–3 cm). Expected sonar gain is small; not worth building
   on before cheaper improvements.
+
+## Phone speakers, mics and distortion (researched 2026-11-17; three parallel searches + checks on the phone)
+Device facts (label = model the source is about):
+- Pixel 11: stereo = bottom speaker + earpiece (GSMArena review snippet). Amplifier part for Pixel 10/11 not public;
+  Pixel 9 Pro XL uses Cirrus CS35L41B (iFixit), Pixel 6 Pro 2× CS35L41B, Pixel 9a a TI class-D. Pixel 6 device tree:
+  cs35l41 "Protect Lite" firmware, per-speaker calibration. No published Pixel 9–11 response curves, no >16 kHz data.
+- Pixel 11 Pro XL (Bandicoot Lab): 76.6 dBA max, treble-forward; mic response "nearly flat". Pixel 10 Pro XL: distortion
+  and chassis vibration near max volume (Mobilissimo).
+- Android CDD properties PROPERTY_SUPPORT_SPEAKER/MIC_NEAR_ULTRASOUND (18.5–20 kHz within 40 dB / 15 dB of 2 kHz):
+  Pixel values unpublished — readable via AudioManager.getProperty in the app.
+- Pixel 11 audio policy has AUDIO_CONTENT_TYPE_ULTRASOUND behind ACCESS_ULTRASOUND (signature|privileged): not usable by
+  apps. Related shipped tech: Nest Hub ultrasound presence sensing; Elliptic Labs proximity (Xiaomi).
+- Pixel 7 (support page lists 4a 5G–7): Adaptive Sound = mic-driven, time-varying speaker EQ for media; check it's off.
+- Known Pixel 7–10 bug: random audio pops when streams start/overlap (software).
+Speaker protection (TI/Cirrus docs, generic): excursion limiting is fast (ms look-ahead) and acts mostly near/below
+resonance; thermal limiting builds over seconds–minutes and can attenuate any band incl. highs; multiband release can
+"pump" ping to ping. Roughly linear/time-invariant at moderate levels.
+Distortion (MobiCom'22 "Experience", via D. Li dissertation ch. 5): 15 phones incl. Pixel 4 leak audible products from
+18–22 kHz signals at 80% volume; the AMPLIFIER dominates distortion; harmonics alias in the 48 kHz playback chain (20 kHz
+→ 4/8/12/16 kHz); above ~40% volume (their amp) extra volume mostly becomes distortion and at 100% the fundamental even
+dropped. Chirps leak least; two tones add intermodulation.
+Linear vs exponential sweeps: an n-th harmonic of a linear up-chirp smears over negative lags (before the direct sound);
+of a down-chirp over positive lags (our false far echoes). Farina/Novak exponential sweeps put each harmonic at a clean
+negative time (Δt_n = −L ln n) but move energy to low frequencies (worse resolution with our weak highs).
+Using distortion: AliasProbe (unreviewed 2026, iPhone 15 Pro): 16–20 kHz chirp's 2nd harmonic aliases to an 8–16 kHz
+down-chirp; stitching gave ~2× narrower single-reflector peaks in 4/12 runs, needs 100% volume; template must be
+bandpass(s²). MobiCom'22 suggests those aliases are emitted acoustically (audible). HotNets'22 uses 3rd-order IM for
+micro-vibration sensing. Crack detection uses harmonics, but rooms are linear → no use for mapping.
+Practice: BatMapper uses Hann-windowed linear up-chirps (8–16 kHz), per-mic band-pass, first peak as time reference.
+Ranked for the app: (1) volume/linearity test (find the knee; app currently holds 80% media volume); (2) pulse inversion
+(+s/−s pairs, half-difference cancels even harmonics and their aliases) — keeps up-sweeps; (3) log near-ultrasound
+properties + direct-path level per ping (detect thermal limiting); (4) Adaptive Sound off; (5) exponential sweep only as
+a speaker-distortion diagnostic; (6) AliasProbe stitching — low value. Checked: in our current periodic Full sweep the
+next ping's harmonic precursor (~−0.55T) stays outside the echo window and the noise tail (needs nb ≤ P − 0.55T; holds
+with fill 0.5 and the range-fit rule).
