@@ -147,10 +147,10 @@ function paint(theta, prof, binM, maxR, mask) {
 const MCELL = 0.05, MEXT = 7.6, MN = 2 * Math.ceil(MEXT / MCELL);   // grid covers +-7.6 m
 const ARM = 0.25;            // phone is held ~25 cm in front of your turning axis (your body)
 const RB = 0.05, NRB = Math.ceil(MEXT / RB);                         // range bins for the floor/ceiling check
-let mapL = new Float32Array(MN * MN), ringHits = new Uint16Array(NRB), covered = 0;
+let mapL = new Float32Array(MN * MN), ringFrac = new Float32Array(NRB * 12), covered = 0;
 const mapCv = document.createElement('canvas'); mapCv.width = mapCv.height = MN;
 const mapCtx = mapCv.getContext('2d'), mapImg = mapCtx.createImageData(MN, MN);
-function clearMap() { mapL.fill(0); ringHits.fill(0); covered = 0; }
+function clearMap() { mapL.fill(0); ringFrac.fill(0); covered = 0; }
 const popc = v => { let c = 0; while (v) { c += v & 1; v >>= 1; } return c; };
 function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
   const i = Math.floor(x / MCELL + MN / 2), j = Math.floor(MN / 2 - y / MCELL);
@@ -158,36 +158,51 @@ function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
   const k = j * MN + i; mapL[k] = Math.max(-2, Math.min(6, mapL[k] + dv));
 }
 // how loud the click is toward bearing phi (deg, 0 = where the bottom edge points): strong ahead, weak behind (body)
-const beamW = phi => { const c = Math.cos(phi * Math.PI / 180); return c > 0 ? 0.1 + 0.9 * c ** 4 : 0.1; };
+const beamW = phi => { const c = Math.cos(phi * Math.PI / 180); return c > 0 ? 0.06 + 0.94 * c ** 4 : 0.06; };
 function updateMap(theta, kept, mask, maxR) {
   const th = theta * Math.PI / 180, px = ARM * Math.sin(th), py = ARM * Math.cos(th);
   const sec = Math.floor((((theta % 360) + 360) % 360) / 30); covered |= 1 << sec;
-  for (const q of kept) { const rb = Math.round(q.r / RB); for (let d = -1; d <= 1; d++) if (rb + d >= 0 && rb + d < NRB) ringHits[rb + d] |= 1 << sec; }
+  // per sector, running fraction of clicks with an echo at each distance (+-5 cm); fades, so clutter seen once
+  // in a sector doesn't count forever
+  const hit = new Uint8Array(NRB);
+  for (const q of kept) { const rb = Math.round(q.r / RB); for (let d = -1; d <= 1; d++) if (rb + d >= 0 && rb + d < NRB) hit[rb + d] = 1; }
+  for (let b = 0; b < NRB; b++) { const k = b * 12 + sec; ringFrac[k] += 0.25 * (hit[b] - ringFrac[k]); }
   const nCov = popc(covered);
+  const isRing = r => {           // floor/ceiling: echo at this distance in most clicks, in >= 75% of the sectors turned through
+    if (nCov < 8 || r <= 0.6 || r >= 2.2) return false;
+    const rb = Math.round(r / RB); let n = 0;
+    for (let sc = 0; sc < 12; sc++) if ((covered >> sc) & 1 && ringFrac[rb * 12 + sc] >= 0.5) n++;
+    return n >= 0.75 * nCov;
+  };
   const best = kept.length ? Math.max(...kept.map(q => q.l)) : 0;
   let nearAhead = maxR;
   for (const q of kept) {
+    // floor/ceiling (not timed as straight ahead: a wall you point at can sit at the floor's distance): kept off the
+    // map, and it doesn't stop the "seen through" clearing either
+    if (q.dir !== 'ahead' && isRing(q.r)) continue;
     if (q.dir !== 'behind') nearAhead = Math.min(nearAhead, q.r);
-    // floor/ceiling: same distance (+-5 cm) in >= 85% of the directions turned through so far, and not timed as
-    // straight ahead (a wall you point at can sit at the floor's distance)
-    const rb = Math.round(q.r / RB);
-    if (q.dir !== 'ahead' && nCov >= 8 && q.r > 0.6 && q.r < 2.2 && popc(ringHits[rb] & covered) >= 0.85 * nCov) continue;
     const strength = Math.min(1, Math.max(0.3, (q.l - (best - 24)) / 24));
-    const lagOK = q.heard2 >= 3.2;                       // back mic heard it: use the timing
+    const lagOK = q.lagOK;                               // back mic heard it clearly and the timing is plausible
     const dA = Math.min(1, MCELL / q.r) * 180 / Math.PI;  // ~one cell per step along the arc
     for (let phi = -180; phi < 180; phi += dA) {
       let w = beamW(phi);
       if (lagOK) { const e = Math.cos(phi * Math.PI / 180) - q.cos; w *= Math.exp(-e * e / (2 * 0.3 * 0.3)); }
-      if (w < 0.05) continue;
+      if (w < (lagOK ? 0.05 : 0.08)) continue;
       const a = th + phi * Math.PI / 180;
       mapAdd(px + q.r * Math.sin(a), py + q.r * Math.cos(a), 0.5 * strength * w);
     }
   }
   // sound passed through the beam (+-24 deg) up to just before the nearest echo -> those cells are probably empty
   const fr = nearAhead - 0.15;
-  for (let phi = -24; phi <= 24; phi += 3) {
-    const a = th + phi * Math.PI / 180, w = 0.12 * beamW(phi) * (kept.length ? 1 : 0.5);
-    for (let r = Math.max(mask, 0.2); r < fr; r += MCELL) mapAdd(px + r * Math.sin(a), py + r * Math.cos(a), -w);
+  const done = new Set();                                // carve each cell at most once per click
+  for (let r = Math.max(mask, 0.2); r < fr; r += MCELL) {
+    const dphi = Math.min(3, 0.8 * MCELL / r * 180 / Math.PI);
+    for (let phi = -24; phi <= 24; phi += dphi) {
+      const a = th + phi * Math.PI / 180, x = px + r * Math.sin(a), y = py + r * Math.cos(a);
+      const key = Math.floor(x / MCELL + MN / 2) + MN * Math.floor(MN / 2 - y / MCELL);
+      if (done.has(key)) continue; done.add(key);
+      mapAdd(x, y, -0.12 * beamW(phi) * (kept.length ? 1 : 0.5));
+    }
   }
 }
 function renderMap(maxR) {
@@ -318,15 +333,27 @@ function envOf(x) {
   return env;
 }
 // lag (samples) of mic 2 relative to mic 1 around index c: envelope cross-correlation, parabolic refinement
+// Returns { lag, q }: q = correlation coefficient (shape match, -1..1). Plain products let a bigger neighbouring
+// echo in mic 2 win (lags piled up at the search limit in the logs), so each shift is normalized.
 function micLag(e1, e2, c, half = 18, maxLag = 26) {
-  let best = -1, bl = 0; const sc = [];
+  let best = -2, bl = 0; const sc = [];
   for (let L = -maxLag; L <= maxLag; L++) {
-    let s = 0; for (let t = c - half; t <= c + half; t++) { const u = t + L; if (t >= 0 && u >= 0 && t < e1.length && u < e2.length) s += e1[t] * e2[u]; }
-    sc.push(s); if (s > best) { best = s; bl = L; }
+    let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (let t = c - half; t <= c + half; t++) {
+      const u = t + L; if (t < 0 || u < 0 || t >= e1.length || u >= e2.length) continue;
+      const a = e1[t], b = e2[u]; n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+    }
+    const va = saa - sa * sa / n, vb = sbb - sb * sb / n, r = n > 4 && va > 0 && vb > 0 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : -1;
+    sc.push(r); if (r > best) { best = r; bl = L; }
   }
+  // ambiguous: another clearly separate shift (>= 6 samples away) fits almost as well (e.g. a neighbouring echo
+  // with the same shape) -> the lag can't be trusted
+  let second = -2;
+  for (let k = 1; k < sc.length - 1; k++) if (Math.abs(k - maxLag - bl) >= 6 && sc[k] >= sc[k - 1] && sc[k] >= sc[k + 1]) second = Math.max(second, sc[k]);
+  const amb = second > best - 0.1;
   const i = bl + maxLag;
-  if (i > 0 && i < sc.length - 1) { const y0 = sc[i - 1], y1 = sc[i], y2 = sc[i + 1], d = y0 - 2 * y1 + y2; if (d) return bl + 0.5 * (y0 - y2) / d; }
-  return bl;
+  if (i > 0 && i < sc.length - 1) { const y0 = sc[i - 1], y1 = sc[i], y2 = sc[i + 1], d = y0 - 2 * y1 + y2; if (d < 0) return { lag: bl + 0.5 * (y0 - y2) / d, q: best, amb }; }
+  return { lag: bl, q: best, amb };
 }
 function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' : 'side'; }
 
@@ -361,7 +388,8 @@ function frame(binM, binS, t0) {
       const { raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value);
       const env2 = envOf(x2), raw2 = env2.subarray(d, d + raw.length);
       // back-mic noise level, to tell whether the back mic actually heard an echo
-      const noise2 = pct(env2.subarray(d + nb, d + PERIOD - T), 0.3) + 1e-12;
+      const tail2 = env2.subarray(d + nb, d + PERIOD - T);
+      const noise2 = pct(tail2.length > 50 ? tail2 : raw2, 0.3) + 1e-12;
       const o = JSON.parse(Native.orientation());
       // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
       // plus half the sweep length (centre of the sweep), counted back from the buffer end
@@ -373,15 +401,19 @@ function frame(binM, binS, t0) {
       const tp = toProfile(raw, peak, binM, binS, +$('mask').value, noise, isNaN(+$('sens').value) ? $('sens').value : +$('sens').value);
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
-      const directLag = micLag(env, env2, d, 10, 26);   // full window around the click (not one-sided)
+      const directLag = micLag(env, env2, d, 10, 26).lag;   // full window around the click (not one-sided)
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
-        q.lag = micLag(raw, raw2, i0);
+        const ml = micLag(raw, raw2, i0);
+        q.lag = ml.lag; q.match = ml.amb ? 0 : ml.q;   // ambiguous -> no usable match
         q.cos = Math.max(-1, Math.min(1, q.lag / MIC_LAG));
         let p2 = 0; for (let i = Math.max(0, i0 - 26); i < Math.min(raw2.length, i0 + 27); i++) p2 = Math.max(p2, raw2[i]);
         q.heard2 = p2 / noise2;                                   // back-mic echo strength over its own noise
-        q.dir = q.heard2 >= 3.2 ? classify(q.cos) : 'side';       // < ~10 dB: direction unknown -> unsure
+        // trust the timing only if the back mic heard it (>= ~10 dB), the lag is physically possible (|lag| <= mic
+        // spacing + 2 samples) and the two mics' echo shapes match; otherwise direction unknown -> unsure
+        q.lagOK = q.heard2 >= 3.2 && Math.abs(q.lag) <= MIC_LAG + 2 && q.match >= 0.6;
+        q.dir = q.lagOK ? classify(q.cos) : 'side';
       }
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
@@ -392,7 +424,7 @@ function frame(binM, binS, t0) {
       const front = kept.filter(q => q.dir === 'ahead');   // distance readout: confirmed-ahead echoes only
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
-        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2)).toFixed(1)]) });
+        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2)]) });
       if (sonarLog.length > 4000) sonarLog.shift();
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
@@ -411,19 +443,22 @@ function frame(binM, binS, t0) {
     }
 }
 
-async function start() {
+async function start(keep) {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
   const P = PINGS[$('ping').value];
   const rate = +$('rate').value;
   PERIOD = Math.round(SR / rate);
-  PING = P.fill ? linChirp(SR, 16000, 22000, P.fill * PERIOD / SR, 'hann') : P.sig;
+  // long sweep: half the period, but leave room for the whole range + a noise stretch (fast clicks / 7 m range)
+  const needNb = Math.round(2 * +$('range').value / C * SR);
+  PING = P.fill ? linChirp(SR, 16000, 22000, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), 'hann') : P.sig;
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
   for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   const r = Native.sonarStart(f32ToB64(play), PERIOD, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; try { Native.sonarRestoreVolume(); } catch (e) { } return; }
-  running = true; yaw0 = null; nearHist = []; lastFrames = -1; staleSince = 0; clearAcc(); clearMap();
+  running = true; lastFrames = -1; staleSince = 0;
+  if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); }
   const gen = ++loopGen;          // any older loop sees a different generation and exits
   $('go').textContent = 'Stop';
   await sleep(300);
@@ -436,7 +471,7 @@ function saveLog() {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
       settings: { rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
                   range: $('range').value, dirFilter: $('dirf').value },
-      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b, back-mic echo dB over its noise]; h = heading deg at click time; dl = direct-sound lag; avg = extra clicks folded', frames: sonarLog }));
+      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b, back-mic echo dB over its noise, mic shape match -1..1]; h = heading deg at click time; dl = direct-sound lag; avg = extra clicks folded', frames: sonarLog }));
   } catch (e) { }
   sonarLog = [];
 }
@@ -444,17 +479,18 @@ function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textCo
 // user-initiated stop (button / Back): also hand the media volume back and save the log; restarts for setting
 // changes keep both going
 function stopByUser() { stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
-window.onSonarStopped = () => { running = false; loopGen++; $('go').textContent = 'Start sonar'; saveLog(); };
-$('go').onclick = () => running ? stopByUser() : start();
+window.onSonarStopped = why => { running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
+$('go').onclick = () => running ? stopByUser() : start(false);
 $('clear').onclick = () => { clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
-$('range').onchange = $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
+$('range').onchange = () => { clearAcc(); if (running && $('ping').value === 'quietlong') { stop(); start(true); } };   // sweep length depends on range
+$('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
 function showViewHelp() { $('howmap').style.display = $('dirf').value === 'map' ? '' : 'none'; }
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
-$('ping').onchange = () => { buildSens($('sens').value); saveSettings(); if (running) { stop(); start(); } };
-$('rate').onchange = () => { if (running) { stop(); start(); } };
+$('ping').onchange = () => { buildSens($('sens').value); saveSettings(); if (running) { stop(); start(true); } };
+$('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
-$('vol').onchange = () => { if (running) { stop(); start(); } };
+$('vol').onchange = () => { if (running) { stop(); start(true); } };
 drawFrame(null, 5);
 // Buttons: above the radar in portrait, top of the right column in landscape.
 function placeButtons() {

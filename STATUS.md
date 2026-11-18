@@ -293,3 +293,23 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   them (blurred near corners). Simulated room (4 walls, floor echo, 30% junk echoes, 2 turns): all four walls at the
   right distances, floor ring removed, some arc ghosts at corners. Real-world result unknown.
 - App now opens straight on the sonar; the old test screen is behind the "Tools" button (also used for adb autorun).
+
+## 19. Audit (2026-11-17): own review + independent agent review, fixes applied — built, not yet installed
+- From the user's Map-view logs (9.5 min, Quiet (long)): **47% of echoes had a physically impossible mic lag** (|lag| > 21
+  samples; max for 14.3 cm is 19.9) — they piled up at the ±24–26 search limit and were then labelled ahead/behind with
+  full confidence. Older Mid logs show the same (45%). Cause: plain envelope products let a bigger neighbouring echo in the
+  back mic win. Fix: normalized (Pearson) envelope correlation per shift; the direction is trusted only if the back mic
+  heard it (≥10 dB), |lag| ≤ 21.9 and shape match ≥ 0.6 and no second shift fits almost as well; otherwise "unsure".
+  Synthetic check: 4 of 5 cases correct; the 5th (a 4× louder echo 7 cm away in the back mic) is a real two-mic limit.
+  Log entries gain a 6th field (shape match).
+- Direct-sound "mic check" lag varies 2–26 samples across sessions (expected constant): likely sound through the phone
+  body + grip; treat that check as weak.
+- Map: floor/ceiling echoes no longer stop the "seen-through" clearing (both reviews); floor/ceiling evidence is now a
+  fading per-sector fraction instead of bits that only accumulate; free-space rays spaced by distance (no skipped cells);
+  unconfirmed echoes no longer paint arcs behind you; changing ping/rate/volume keeps the map and start heading.
+- Quiet (long) at 15 clicks/s + 7 m: the sweep is shortened so the full range + a noise stretch always fit (range was
+  silently cut to 5.7 m and the back-mic noise came from one sample). Back-mic noise falls back like the bottom mic's.
+- Android: no start while the app is paused (pause race could leave it pinging in the background); page pause handler
+  also stops the native side; headphones/Bluetooth connected mid-session stop the sonar (it previously only checked at
+  start); record thread catches errors, can't write into a newer session's buffer; base64 encoding moved out of the lock.
+- Not changed (minor/by design): display lags the turn by ~0.2–0.5 s; dead landscape CSS; background JS polling.

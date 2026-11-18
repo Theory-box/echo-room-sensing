@@ -77,9 +77,34 @@ public class MainActivity extends Activity implements SensorEventListener {
     private final Object ringLock = new Object();
     private volatile int sonarGen = 0;             // each start gets a new generation; an old record thread exits on mismatch
     private int savedVolume = -1;         // user's media volume before the radar started (restored on stop)
+    private volatile boolean paused = true;          // activity not in the foreground: never start the sonar
+
+    /** Headphones / Bluetooth / USB audio connected? (never click into someone's ears) */
+    private boolean earOutputConnected() {
+        AudioManager am = getSystemService(AudioManager.class);
+        for (AudioDeviceInfo dev : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int t = dev.getType();
+            if (t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
+                    || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                    || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    || t == AudioDeviceInfo.TYPE_USB_HEADSET)
+                return true;
+        }
+        return false;
+    }
+
+    /** Stop from a background thread (e.g. headphones plugged in mid-session): stop on the UI thread, tell the page. */
+    private void stopSonarFromBackground(String why) {
+        runOnUiThread(() -> {
+            stopSonar();
+            restoreVolume();
+            if (web != null) web.evaluateJavascript("window.onSonarStopped && onSonarStopped(" + JSONObject.quote(why) + ")", null);
+        });
+    }
 
     private synchronized String startSonar(String pingB64, int periodFrames, int sr) {
         stopSonar();
+        if (paused) return "error: app is not in the foreground";
         AudioRecord recOrNull = null;
         try {
             byte[] pb = Base64.decode(pingB64, Base64.DEFAULT);
@@ -91,16 +116,11 @@ public class MainActivity extends Activity implements SensorEventListener {
             AudioManager am = getSystemService(AudioManager.class);
             // Safety: never click into headphones / Bluetooth (80% media volume into someone's ears), and the timing
             // model assumes the bottom speaker. Refuse to start while such an output is connected.
+            if (earOutputConnected())
+                return "error: headphones or Bluetooth audio connected - disconnect them to use the sonar";
             AudioDeviceInfo speaker = null;
-            for (AudioDeviceInfo dev : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
-                int t = dev.getType();
-                if (t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
-                        || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                        || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLE_SPEAKER
-                        || t == AudioDeviceInfo.TYPE_USB_HEADSET)
-                    return "error: headphones or Bluetooth audio connected - disconnect them to use the sonar";
-                if (t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = dev;
-            }
+            for (AudioDeviceInfo dev : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))
+                if (dev.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = dev;
             int mx = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             if (savedVolume < 0) savedVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC);
             am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(mx * 0.8f), 0);
@@ -141,6 +161,11 @@ public class MainActivity extends Activity implements SensorEventListener {
                         long now = System.currentTimeMillis();
                         if (now - lastVol > 500) {          // hold media volume at 80% while the radar runs
                             lastVol = now;
+                            if (earOutputConnected()) {     // headphones plugged in mid-session: stop at once
+                                sonarOn = false;
+                                stopSonarFromBackground("headphones or Bluetooth audio connected - sonar stopped");
+                                break;
+                            }
                             AudioManager amv = getSystemService(AudioManager.class);
                             int target = Math.round(amv.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.8f);
                             if (amv.getStreamVolume(AudioManager.STREAM_MUSIC) != target)
@@ -150,6 +175,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                         if (n < 0) { Log.e(TAG, "sonar read error " + n); break; }   // stops advancing -> JS shows "stalled"
                         if (n == 0) continue;
                         synchronized (ringLock) {
+                            if (myGen != sonarGen) break;   // a newer start owns the ring now
                             int frames = n / 2;
                             for (int f = 0; f < frames; f++) {
                                 int pos = (int) ((ringFrames + f) % ringCap);
@@ -159,6 +185,8 @@ public class MainActivity extends Activity implements SensorEventListener {
                             ringFrames += frames;
                         }
                     }
+                } catch (Throwable t) {
+                    Log.e(TAG, "sonar record thread failed", t);   // recording stops advancing -> page shows "stalled"
                 } finally {
                     try { rec.stop(); } catch (Throwable ignored) { }
                     rec.release();
@@ -198,19 +226,22 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     /** Latest `frames` stereo frames (both mics, same instant) as base64 interleaved float32, prefixed "totalFrames|". */
     private String getSonarBoth(int frames) {
+        float[] out;
+        long total;
         synchronized (ringLock) {
-            if (ring == null || ringFrames < frames) return "0|";
-            float[] out = new float[frames * 2];
+            if (ring == null || ringFrames < frames || frames > ringCap) return "0|";
+            out = new float[frames * 2];
+            total = ringFrames;
             long start = ringFrames - frames;
             for (int i = 0; i < frames; i++) {
                 int pos = (int) ((start + i) % ringCap);
                 out[2 * i] = ring[2 * pos];
                 out[2 * i + 1] = ring[2 * pos + 1];
             }
-            ByteBuffer bb = ByteBuffer.allocate(out.length * 4).order(ByteOrder.LITTLE_ENDIAN);
-            bb.asFloatBuffer().put(out);
-            return ringFrames + "|" + Base64.encodeToString(bb.array(), Base64.NO_WRAP);
         }
+        ByteBuffer bb = ByteBuffer.allocate(out.length * 4).order(ByteOrder.LITTLE_ENDIAN);
+        bb.asFloatBuffer().put(out);
+        return total + "|" + Base64.encodeToString(bb.array(), Base64.NO_WRAP);
     }
 
     /** Latest `frames` samples of one channel (0 = bottom mic, 1 = back mic) as base64 float32, prefixed "totalFrames|". */
@@ -269,6 +300,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     protected void onResume() {
         super.onResume();
+        paused = false;
         int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY};
         for (int t : types) {
             Sensor s = sm.getDefaultSensor(t);
@@ -279,6 +311,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     protected void onPause() {
         super.onPause();
+        paused = true;
         sm.unregisterListener(this);
         stopSonar();   // never keep pinging in the background
         restoreVolume();
