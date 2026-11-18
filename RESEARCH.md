@@ -119,3 +119,21 @@ properties + direct-path level per ping (detect thermal limiting); (4) Adaptive 
 a speaker-distortion diagnostic; (6) AliasProbe stitching — low value. Checked: in our current periodic Full sweep the
 next ping's harmonic precursor (~−0.55T) stays outside the echo window and the noise tail (needs nb ≤ P − 0.55T; holds
 with fill 0.5 and the range-fit rule).
+
+## Moving through the interference pattern: synthetic aperture / holography (researched 2026-11-17)
+- AIM (MobiSys 2018, Samsung S7): phone moved along a path as a virtual array (SAR) → 2D acoustic images of objects.
+  Problems named: strong self/background interference, hand jitter off the path, speaker/mic distortion.
+  https://sigmobile.org/grav/research-highlight/aim · https://par.nsf.gov/biblio/10063070
+- SONDAR (2024): inverse SAR (object moves) on commodity devices for size/shape. https://par.nsf.gov/servlets/purl/10569725
+- UW preprint (Mar 2026, unreviewed): unmodified iPhone + motorized turntable rotating the OBJECT = known circular
+  aperture → 3D acoustic volume in <30 s; says hand-trajectory estimation is the dominant error in prior phone SAR.
+  https://coherent-3d-acoustic-imaging.pages.dev/
+- Handheld mmWave SAR (ViSAR, IFNet) also fights handheld motion; ViSAR uses time-domain backprojection for non-linear
+  paths. https://cse.sc.edu/~sur/papers/Jackie_UbiComp21_ViSAR.pdf · https://arxiv.org/pdf/2405.02023.pdf
+- Holography with ONE moving mic + a fixed reference mic = "virtual phased array" (established in noise-source
+  localization; needs a steady sound field). https://acoustics-old.ippt.pan.pl/index.php/aa/article/view/1524
+- Room geometry from a moving co-located speaker+mic / robot: first-order echoes, image sources (no interference-pattern
+  method found). https://arxiv.org/pdf/1907.01169
+- For us: object-scale SAR on phones is proven; room-scale wall imaging this way isn't. The known blocker is the hand's
+  path. A lazy Susan (phone at an offset from the centre, rotation from the gyro) gives a known circular aperture — same
+  idea as the UW turntable, but rotating the phone.
