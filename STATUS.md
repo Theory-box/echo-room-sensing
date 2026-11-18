@@ -719,3 +719,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   losing whole cycles. First try at following one echo's own phase with all 256 tones (MilliSonic-style: coarse
   peak + fine phase, 190/s) locked onto a stronger static reflection at ~0.84 m instead of the wall → needs proper
   echo selection. Scripts: analysis/pilot_calibration.py, analysis/echo_phase_follow.py.
+- **Root cause of the pilot under-read: the 43 ms window smears the motion (2026-11-18, simulation).** Separating
+  256 tones 23.4 Hz apart needs 2048-sample (43 ms) windows; when the phone moves during a window, each echo's phase
+  turns inside it and averages away (a full turn per window at ~20 cm/s) → whole cycles lost. Simulated wall moving a
+  known 25 cm: pilot tracker reads 20.9 / 10.3 / 1.7 / 1.6 cm at peak 6 / 12 / 25 / 50 cm/s (hand speeds 5–30 cm/s →
+  the 0.2–0.3× seen on the phone). A short window (128) can't be used: the dense map tones leak in (reads −80…−96 cm).
+  The 16-tone hum (250 Hz apart → 192-sample, 4 ms blocks): 20.5 / 21.4 / 23.2 / 23.3 cm — speed-independent, 82–93 %
+  (the rest: slot median with static clutter). So the fix is wide-spaced motion tones read with short windows, kept
+  apart from the dense map tones (separate band with a guard gap, or the other speaker).
