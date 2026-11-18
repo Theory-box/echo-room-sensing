@@ -277,3 +277,19 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
 - **Cycling ping bands** (frequency diversity): cross-confirm echoes seen in several bands; an inaudible variant would
   cycle within 16–22 kHz.
 - From RESEARCH.md: track echoes over time; subtract the phone's own direct/body signal; ARCore pose for room mapping.
+- **Three-mic experiment** (2026-11-17 discussion): phone held flat, bottom edge forward (upright/on-edge rejected).
+  Third (camera-bar, downward-facing) mic adds: floor/ceiling vs wall labelling from the body shadow (~55–65%, untested),
+  3-mic combined signal (~2–4 dB), three-pair timing consistency check to mark bad echoes "unsure". Little left/right
+  (only ~1.5–3 cm off the long axis); turning resolves left/right mirror ghosts instead. Grip: normal hold, fingers off the
+  camera bar (a small hold diagram). Waits until the two-mic Map view is judged.
+
+## 18. Map view (2026-11-17) — built, untested on the phone
+- View → **Map**: occupancy grid (Moravec & Elfes 1985) in the room frame, 5 cm cells, ±7.6 m. Each echo adds evidence
+  on its distance arc, weighted by the click beam (strong ahead) and by how well each direction fits the two-mic timing
+  (mirror directions fit equally; turning sorts them out); each click removes a little evidence along its beam (±24°)
+  closer than the nearest echo. Echoes at the same distance in ≥85% of headings turned through (0.6–2.2 m, not timed as
+  ahead) are treated as floor/ceiling and kept off. Phone assumed 25 cm in front of the turning axis.
+- Smooth walls echo at their perpendicular distance from many headings, so walls build up where you pointed straight at
+  them (blurred near corners). Simulated room (4 walls, floor echo, 30% junk echoes, 2 turns): all four walls at the
+  right distances, floor ring removed, some arc ghosts at corners. Real-world result unknown.
+- App now opens straight on the sonar; the old test screen is behind the "Tools" button (also used for adb autorun).

@@ -260,7 +260,10 @@ public class MainActivity extends Activity implements SensorEventListener {
             ttsReady = status == TextToSpeech.SUCCESS;
             if (ttsReady) tts.setLanguage(Locale.US);
         });
-        web.loadUrl("file:///android_asset/native.html");
+        // open straight on the sonar; the older test tools (native.html) are reached from its "Tools" link,
+        // or directly when launched with test extras (adb autorun)
+        boolean tools = getIntent().getBooleanExtra("autorun", false) || getIntent().hasExtra("configs");
+        web.loadUrl("file:///android_asset/" + (tools ? "native.html" : "sonar.html"));
     }
 
     @Override
