@@ -254,25 +254,27 @@ function wallOf(u) {
   let sw = 0, sh = 0; for (const [h, , l] of u.s) { const w = Math.pow(10, (l - lm) / 10); sw += w; sh += w * h; }
   // middle = echo-power-weighted mean heading: the echo is loudest facing the wall squarely, and the region's edges
   // are ragged where the echo fades in and out (span midpoint: median 3.0 deg / worst 20 deg off in simulation; this:
-  // 1.9 / 6.4)
+  // 1.8 / 5.6)
   const mid = sh / sw, c = ((mid % 360) + 360) % 360;
   let sD = 0; for (const [h, r] of u.s) sD += r + ARM * Math.cos((h - mid) * Math.PI / 180);
   const D = sD / u.s.length, r = D - ARM;
   return { a: c, D, r, span, half: Math.max(0.25, Math.min(1.2, D * Math.tan(Math.min(span, 90) / 2 * Math.PI / 180))), w: u.n, k: 1 };
 }
-// A region's first edge is only real if you had already looked past it and heard nothing there; otherwise (a wall you
-// were facing at Start, or the first turn after it) the region may be cut off on that side and its middle is wrong.
+// Both edges must be real: you must have looked at least 5 deg past each one (before or while the region was open) and
+// not heard it there. Otherwise (a wall you faced at Start, or one you're still turning past) the region may be cut off
+// on that side and its middle would be wrong. Regions end only after 15 deg without the echo, so any look past an edge
+// within the region's life was a look that heard nothing. (Audit 2026-11-18: an h0-based rule let a cut-off region in.)
 function runOK(u) {
   const span = u.hi - u.lo;
-  const edgeOK = (u.lo < u.h0 - 3 && u.hi > u.h0 + 3) || (u.lo >= u.h0 - 3 && u.covLo < u.h0 - 5) || (u.hi <= u.h0 + 3 && u.covHi > u.h0 + 5);
-  if (!edgeOK) return false;
+  if (!(UHlo < u.lo - 5 && UHhi > u.hi + 5)) return false;
   return u.nc >= 3 && u.n >= 5 && span >= RCD_MIN && span <= RCD_MAX;
 }
 function closeRun(u, why) {
   RUNS = RUNS.filter(x => x !== u);
   const span = u.hi - u.lo; if (span < 3) return;           // never turned: nothing to log
   const wl = wallOf(u), ok = runOK(u) && !wallHidden(wl);
-  if (why === 'wide') WIDE.push(wl.r); else if (span >= RCD_MIN) REG.push([wl.r, wl.a]);
+  if (why === 'wide') { if (!WIDE.some(x => Math.abs(x - wl.r) < 0.03)) WIDE.push(wl.r); }
+  else if (span >= RCD_MIN) { REG.push([wl.r, wl.a]); if (REG.length > 300) REG.shift(); }
   rcdDone.push([u.id, +wl.r.toFixed(2), Math.round(wl.a), Math.round(span), u.n, ok ? 1 : 0, why[0]]);
   if (!ok) return;
   // same wall seen again (another turn, or a piece of it cut off by a dropout): merge, weighted by detections
@@ -290,22 +292,24 @@ function closeRun(u, why) {
 // does distance r fit region u at (unwrapped) heading h? returns how far off it is, or Infinity
 function runFit(u, r, h) {
   const off = Math.min(60, Math.abs(h - u.hMin)), hiR = u.rMin + RCD_TOL + ARM * (1 - Math.cos(off * Math.PI / 180));
-  return r < u.rMin - RCD_TOL || r > hiR ? Infinity : Math.max(0, r - (u.rMin + ARM * (1 - Math.cos(off * Math.PI / 180))));
+  return r < u.rMin - RCD_TOL || r < u.r0 - RCD_TOL - ARM * (1 - Math.cos(Math.PI / 3)) || r > hiR ? Infinity : Math.max(0, r - (u.rMin + ARM * (1 - Math.cos(off * Math.PI / 180))));
 }
 // kept: this reading's detections (with confirmed-track flag); theta: heading at click time; tNow: ms
 function updateWalls(theta, kept, tNow) {
-  if (UHlast !== null) UH += angDiff(theta, UHlast);
+  if (UHlast === null) { UH = UHlo = UHhi = theta; }   // after a reset: same frame as the map (theta), not 0
+  else UH += angDiff(theta, UHlast);
   UHlast = theta; UHlo = Math.min(UHlo, UH); UHhi = Math.max(UHhi, UH);
   const used = new Set();
   for (const q of kept.filter(q => q.dir !== 'behind' && !isRing(q.r)).sort((a, b) => b.l - a.l)) {
     let best = null, bf = Infinity;
     for (const u of RUNS) if (!used.has(u)) { const f = runFit(u, q.r, UH); if (f < bf) { bf = f; best = u; } }
     let u = best;
-    if (!u) { u = { id: runNext++, n: 0, nc: 0, s: [], lo: UH, hi: UH, rMin: q.r, hMin: UH, lastH: UH, lastT: tNow, h0: UH, covLo: UHlo, covHi: UHhi }; RUNS.push(u); }
+    if (!u) { u = { id: runNext++, n: 0, nc: 0, s: [], lo: UH, hi: UH, rMin: q.r, hMin: UH, lastH: UH, lastT: tNow, r0: q.r }; RUNS.push(u); }
     used.add(u);
     if (q.r < u.rMin) { u.rMin = q.r; u.hMin = UH; }
     u.lo = Math.min(u.lo, UH); u.hi = Math.max(u.hi, UH); u.lastH = UH; u.lastT = tNow;
     u.n++; u.s.push([UH, q.r, q.l]); if (q.tconf) u.nc++;
+    if (u.s.length > 400) u.s = u.s.filter((_, i) => i % 2 === 0);   // standing still facing it: thin out (bounded)
     if (u.hi - u.lo > RCD_MAX) closeRun(u, 'wide');           // all the way round: floor/ceiling, not a wall
   }
   for (const u of [...RUNS]) if (!used.has(u) && (Math.abs(UH - u.lastH) > RCD_GAP || tNow - u.lastT > 3000)) closeRun(u, 'ended');
@@ -900,7 +904,6 @@ function frame(binM, binS, t0) {
           q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null,
           q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1)]), mn: mnClicks,
         nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]) });
-      if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       const mapMode = $('dirf').value === 'map';
@@ -910,6 +913,7 @@ function frame(binM, binS, t0) {
         const fl = sonarLog[sonarLog.length - 1];
         if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; } }
       } else paint(theta, prof, binM, mR, mk);
+      if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       drawAscan(lev, kept, binM, mR, mk, lastThr);
       drawFrame(theta, mR);
       // smooth over the last ~1.2 s (at least 3 clicks), not a fixed number of frames

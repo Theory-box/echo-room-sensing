@@ -469,3 +469,11 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   found, direction error median 1.8°, worst 5.6°, distance ±2 cm; span midpoint instead of power weighting was
   3.0° / 20°. ~1 false wall per case remains (sim multipath at fixed distances). A harness bug (heading reference)
   first looked like a 5–7° lag; it wasn't the app. Untested on the phone.
+- **Straight walls — audit (2026-11-18), own + independent agent:** fixed (1) walls drawn rotated when the map is
+  cleared mid-session (e.g. switching to Map view while running): the unwrapped heading now restarts at the current
+  heading; (2) the "cut off at Start" rule could accept a region with one fake edge: now both edges must have been
+  looked past by ≥ 5°; (3) a region's samples are thinned when standing still (bounded memory); (4) the region's
+  nearest distance can't creep down beyond what the arm explains; (5) floor lists deduped/capped; (6) long-log part
+  save moved after the Map fields are written. Not changed (nits): open regions aren't logged at Clear/Stop; merging
+  takes the first matching wall; toggling Walls while stopped redraws only on the next reading. Simulation unchanged
+  (33/36, median 1.8°, worst 5.6°); map cleared mid-turn: walls still correct.
