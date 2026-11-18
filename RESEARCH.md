@@ -234,3 +234,17 @@ Script: analysis/purity_coherence.py.
 - Conclusion: the offline-testable levers inside the 16–22 kHz band are largely exhausted; remaining jitter is the
   overlapping-reflection physics. Levers left need new data: other bands (audible), longer looks per heading, or
   different use of the data (multi-spot mapping).
+
+## Three-mic recording (2026-11-18 15:48, Full sweep at 29 % volume, 40 s raw: toward-the-wall movement then a full turn)
+- All three channels distinct (quick check: ch2/ch3 4 samples apart, as before). Levels re the bottom mic: low band
+  (2–8 kHz) mic2 −4…−10 dB, mic3 −5…−17 dB; 8–14 and 16–22 kHz: −18…−26 dB. In the quiet band the other two mics barely
+  hear the echoes (quick check: 25–35 dB below the bottom mic) — why the back mic never helped in Quiet.
+- **Two-mic timing works in the low band:** facing the wall, echo delay mic1→mic2 (envelope cross-correlation, shape
+  match > 0.8 for 60/130 clicks) p10–p90 = 18.5–25.5 samples, median 22.1 ≈ the ~20 expected for straight ahead.
+  8–14 kHz and 16–22 kHz: −33…+27 (random). While turning (low band) the spread widens (−28…+35, median 21.5): echoes
+  from many directions plus junk. The close pair mic2→mic3: no consistent delay (spread 6–37 samples).
+- **Combining mics does not steady distances:** strongest echo 0.45–1.5 m, residual vs a 0.6 s running mean: low band
+  mic1 4.17 cm → +mic2 6.89 → +mic2+mic3 8.16; quiet band 1.16 → 1.16 → 1.15 cm.
+- Conclusion: the extra mics give direction (ahead/side/behind) only at audible low pitches — where the app's Full
+  sweep already times from its 2–8 kHz part (live lags looked random; a shape-match filter like the one here would
+  help). They don't improve distances, and they can't help the quiet modes.
