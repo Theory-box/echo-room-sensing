@@ -491,3 +491,8 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   Revisit only with raw profiles (CA/OS-CFAR against local reverberation) — can't be judged from current logs.
 - **Regression sim, all pings × click rates (2026-11-18):** Quiet 2/4/8/15, Strong 2/4/15, Mid 4/8/15, Full 4/8 —
   no errors; walls 47/48 found, direction median 2.6°, worst 10.6° (Quiet 4/s); wall echo present in 59–96 % of frames.
+- **Raw echo profile in the log (2026-11-18, build "raw profile").** Every frame now carries `p`: the main mic's
+  level for each 3 cm distance step, whole dB re the direct sound, before threshold / 1/r compensation, floored at
+  −99 (~0.7 KB/frame, ~0.6 MB/min at 15/s). Purpose: judge an adaptive threshold (CA/OS-CFAR against local
+  reverberation) offline against the tracker's confirmed echoes before building it. Sim: present in every frame,
+  wall results unchanged (47/48, median 2.6°).

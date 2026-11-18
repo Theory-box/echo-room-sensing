@@ -349,7 +349,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 walls';
+const APP_BUILD = '2026-11-18 raw profile';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value });
@@ -391,10 +391,11 @@ function profileFrom(x, maxR) {
 // pass the sensitivity threshold and are within 24 dB of the strongest one; drop "echoes of echoes" (a weaker
 // peak at ~2x..5x the distance of a stronger one: sound bouncing between the wall and you/the phone).
 function toProfile(raw, peak, binM, binS, mask, noise, thr) {
-  const nbin = Math.floor(raw.length / binS), lev = new Float64Array(nbin), b0 = Math.ceil(mask / binM);
+  const nbin = Math.floor(raw.length / binS), lev = new Float64Array(nbin), b0 = Math.ceil(mask / binM), rawDb = new Array(nbin);
   for (let b = 0; b < nbin; b++) {
     let m = 0; for (let i = Math.floor(b * binS); i < Math.floor((b + 1) * binS); i++) m = Math.max(m, raw[i]);
     const r = Math.max((b + 0.5) * binM, 0.3), a = m / peak;
+    rawDb[b] = Math.max(-99, Math.round(20 * Math.log10(a + 1e-12)));   // logged as-is: no threshold, no 1/r
     lev[b] = a > 3 * noise ? 20 * Math.log10(a * r) : -120;
   }
   // Quiet modes: echoes sit lower relative to the direct sound (high pitch), so a threshold tuned for Strong hides
@@ -430,7 +431,7 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
     for (let d = -1; d <= 1; d++) if (q.b + d >= 0 && q.b + d < nbin) prof[q.b + d] = Math.max(prof[q.b + d], d ? v * 0.5 : v);
   }
   const near = kept.length ? Math.min(...kept.map(q => q.r)) : null;
-  return { prof, near, lev, kept };
+  return { prof, near, lev, kept, rawDb };
 }
 
 // Distance graph (A-scan): echo level vs distance, threshold line, picked echoes labelled.
@@ -903,7 +904,7 @@ function frame(binM, binS, t0) {
         e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
           q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null,
           q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1)]), mn: mnClicks,
-        nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]) });
+        nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]), p: tp.rawDb });
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       const mapMode = $('dirf').value === 'map';
@@ -975,7 +976,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
