@@ -799,3 +799,6 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
 - **Settings per mode (2026-11-18):** the settings rows now show only what the chosen ping uses — Clicks/s hidden for
   Quiet tones / pilots / Hum and the fixed-rate 3-mic test; Pitch bands only for click modes; Hum shows only Ping and
   Volume; Walls / Room box only in Map view (and not for Hum). Updated on every ping or view change.
+- **Ping list tidied (2026-11-18):** "3-mic test" and "Hum" hidden from the list (code kept for later tests; a saved
+  setting pointing at them falls back to the default). Shown: Strong, Mid, Quiet (long), Full sweep, Quiet tones,
+  Quiet tones + pilots.

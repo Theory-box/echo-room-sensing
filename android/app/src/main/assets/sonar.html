@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="mic3test">3-mic test (records; Full sweep)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -92,6 +92,7 @@ const PINGS = {
   // it lands before it, outside the echo window); and a speaker equalizer -- cost 2-8 dB of echo strength on this
   // phone and stepped band weights raised range sidelobes. The code for both remains (flags updown / eq).
   wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
+  // (Hidden from the Ping list 2026-11-18, code kept for later tests: add <option value="mic3test"> / <option value="hum"> back.)
   // TEST (2026-11-18): Full sweep (every pitch 2-22 kHz in one recording) with ALL THREE mics recorded, 15 clicks/s fixed,
   // 40 s of raw audio saved -- for offline study of what the extra mics add (low band: timing works; quiet band; floor
   // vs wall by loudness). The live view runs as Full sweep on the first two mics.
@@ -654,7 +655,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 settings per mode';
+const APP_BUILD = '2026-11-18 tidy ping list';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
