@@ -606,3 +606,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   parabola and |z| ≥ 2.5. On the two sessions it was tuned on (so optimistic): push test wall ahead 48 ahead / 2 behind;
   sweep, echoes from found walls ahead 37 / 6 (old method: coin flip), other echoes 4 / 2; most echoes "unsure".
   Replay of both logs through the app's JS reproduces it (48/1, 38/6). Needs a fresh session to confirm.
+- **Fresh sessions with "rough motion" (2026-11-18 12:50–12:54, Quiet long 15/s, High; 2 / 1 / 4 bands Map 74 / 44 /
+  73 s, then 4 bands Full view 92 s).** Front/back v2 on echoes from found walls ahead (fresh data, not tuned on):
+  2 bands 364 ahead / 15 behind (96 % right, 36 % of them got a verdict); 1 band 55 / 30 (65 %); 4 bands 85 / 24 (78 %).
+  No usable "behind" truth (walls behind are hardly heard; echoes at wall+0.5 m with your back to it were called ahead
+  44 / 0 — probably other things ahead at that distance). Other echoes: mostly called ahead (2 bands 152 / 20).
+  Band comparison vs the 12:09–12:14 sessions: echoes per reading 3.8 (2 bands) vs 2.3–2.4 (1) vs 1.4–2.0 (4) and
+  confirmed share 68–70 vs 60–62 % — consistent; walls/min 76 / 53 / 21 (new) and 32 / 34 / 22 (old); but 1-s wobble
+  1.81 / 1.63 / 1.43 cm (new) vs 1.29 / 1.66 / 1.47 (old) — session-to-session variation is as large as the band
+  effect, so the steadiness gain on the phone is NOT established; the detection gain is.
