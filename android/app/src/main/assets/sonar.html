@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="quiethumband">Quiet tones + hum band (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -109,6 +109,13 @@ const PINGS = {
   // to track the phone's millimetre movement from their phase (as the 16-tone hum did), the rest still build the map
   // (pilots are divided out per tone, so the map's profile shape is unchanged; the other tones are a bit quieter).
   quietpilots: { sig: null, amp: 0.9, tones: true, pilots: true, f0: 16000, f1: 22000, fc: 19000 },
+  // EXPERIMENT (2026-11-18): the pilots under-read movement because the dense map tones force 43 ms windows, and a moving
+  // hand smears the phase within them. Here the movement gets its own band: HB_N hum tones 15.25-17.0 kHz, 250 Hz apart
+  // (the spacing that worked for the hum), read in 8 ms windows; the map tones sit above a gap (17.75-22 kHz). For
+  // both to repeat together the cycle is 1920 samples (25 Hz grid; echoes beyond 6.9 m wrap). Sim: a known 25 cm move
+  // read 24-25 cm at 6-50 cm/s with the map tones playing (pilots: 2-21 cm). Costs: map band 4.25 kHz (~4 cm detail),
+  // map ~3 dB less energy than Quiet tones; the lowest hum tones may be faintly audible to young ears.
+  quiethumband: { sig: null, amp: 0.9, tones: true, humband: true, f0: 17750, f1: 22000, fc: 19875 },
 };
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
@@ -116,7 +123,60 @@ let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
 let HUM = false;
 // ---------- all-tone sonar ("Quiet tones") ----------
-const HS_P = 2048, HS_K0 = 683, HS_NT = 256, HS_J = 3, HS_M = 1024, HS_PILOT = 2, HS_PSTEP = 16, HS_POFF = 8;   // tones k*SR/HS_P, k = 683..938 (16.0-22.0 kHz)
+let HS_P = 2048, HS_K0 = 683, HS_NT = 256;
+const HS_J = 3, HS_M = 1024, HS_PILOT = 2, HS_PSTEP = 16, HS_POFF = 8;
+// DFT of any length (Bluestein: via power-of-two FFTs); power-of-two lengths go straight to fft()
+const BLU = new Map();
+function fftN(re, im, inv) {
+  const n = re.length;
+  if ((n & (n - 1)) === 0) return fft(re, im, inv);
+  let b = BLU.get(n);
+  if (!b) {
+    let m = 1; while (m < 2 * n - 1) m <<= 1;
+    const wr = new Float64Array(n), wi = new Float64Array(n);
+    for (let k = 0; k < n; k++) { const a = Math.PI * ((k * k) % (2 * n)) / n; wr[k] = Math.cos(a); wi[k] = -Math.sin(a); }
+    const Br = new Float64Array(m), Bi = new Float64Array(m);
+    Br[0] = wr[0]; Bi[0] = -wi[0];
+    for (let k = 1; k < n; k++) { Br[k] = Br[m - k] = wr[k]; Bi[k] = Bi[m - k] = -wi[k]; }
+    fft(Br, Bi, false); b = { m, wr, wi, Br, Bi }; BLU.set(n, b);
+  }
+  const sg = inv ? -1 : 1, Ar = new Float64Array(b.m), Ai = new Float64Array(b.m);
+  for (let k = 0; k < n; k++) { const xr = re[k], xi = sg * im[k]; Ar[k] = xr * b.wr[k] - xi * b.wi[k]; Ai[k] = xr * b.wi[k] + xi * b.wr[k]; }
+  fft(Ar, Ai, false);
+  for (let i = 0; i < b.m; i++) { const r = Ar[i] * b.Br[i] - Ai[i] * b.Bi[i], q = Ar[i] * b.Bi[i] + Ai[i] * b.Br[i]; Ar[i] = r; Ai[i] = q; }
+  fft(Ar, Ai, true);
+  for (let k = 0; k < n; k++) {
+    const r = Ar[k] * b.wr[k] - Ai[k] * b.wi[k], q = Ar[k] * b.wi[k] + Ai[k] * b.wr[k];
+    re[k] = inv ? r / n : r; im[k] = inv ? -q / n : q;
+  }
+}
+// hum-band layout (cycle 1920 = 25 Hz grid): map tones HB_MK0..HB_MK1, hum tones HB_HK0 + HB_HSTEP * i
+let HB_TAU = 3;   // seconds of running average for the static part
+const HB_P = 1920, HB_MK0 = 710, HB_MK1 = 880, HB_HK0 = 610, HB_HSTEP = 10, HB_N = 8, HB_GAIN = 3, HB_WIN = 384, HB_HOP = 192;
+function toneLoopHB() {
+  const P = HB_P, nm = HB_MK1 - HB_MK0 + 1, E = 16, tones = [], amp = [];
+  for (let i = 0; i < HB_N; i++) { tones.push(HB_HK0 + HB_HSTEP * i); amp.push(HB_GAIN); }
+  for (let i = 0; i < nm; i++) { const e = Math.min(i, nm - 1 - i); tones.push(HB_MK0 + i); amp.push(e >= E ? 1 : 0.2 + 0.8 * (0.5 - 0.5 * Math.cos(Math.PI * e / E))); }
+  let seed = 777; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const ph = tones.map(() => 2 * Math.PI * rnd());
+  const synth = () => {
+    const re = new Float64Array(P), im = new Float64Array(P);
+    tones.forEach((k, i) => { const c = amp[i] * P / 2; re[k] = c * Math.cos(ph[i]); im[k] = c * Math.sin(ph[i]); re[P - k] = re[k]; im[P - k] = -im[k]; });
+    fftN(re, im, true); return re;
+  };
+  let x = synth();
+  for (let it = 0; it < 60; it++) {   // peak taming (clip and refilter)
+    let r = 0; for (const v of x) r += v * v; r = Math.sqrt(r / P);
+    const re = Float64Array.from(x, v => Math.max(-1.6 * r, Math.min(1.6 * r, v))), im = new Float64Array(P);
+    fftN(re, im, false); tones.forEach((k, i) => { ph[i] = Math.atan2(im[k], re[k]); }); x = synth();
+  }
+  let m = 0; for (const v of x) m = Math.max(m, Math.abs(v));
+  const re = new Float64Array(nm), im = new Float64Array(nm);
+  for (let i = 0; i < nm; i++) { const j = HB_N + i; re[i] = amp[j] / m * Math.cos(ph[j]) * P / 2; im[i] = amp[j] / m * Math.sin(ph[j]) * P / 2; }
+  let rms = 0; for (const v of x) rms += (v / m) * (v / m); rms = Math.sqrt(rms / P);
+  let ph_ = 0, pa = 0; amp.forEach((a, i) => { pa += a * a; if (i < HB_N) ph_ += a * a; });
+  return { x: Float32Array.from(x, v => v / m), X: { re, im }, crest: 1 / rms, pilotShare: ph_ / pa };
+}   // tones k*SR/HS_P, k = 683..938 (16.0-22.0 kHz)
 let HS = false, HS_X = null, HS_CI = 0;   // HS_X: played complex amplitude per tone (re, im)
 function toneLoop(pilots) {
   // amplitudes: flat, raised-cosine edges over 16 tones (down to 0.2); Schroeder phases -pi k^2 / N keep the peak low
@@ -157,7 +217,7 @@ function toneLoop(pilots) {
 function toneProfile(xr, start, ch) {
   const re = new Float64Array(HS_P), im = new Float64Array(HS_P);
   for (let n = 0; n < HS_P; n++) re[n] = xr[2 * (start + n) + ch] || 0;
-  fft(re, im, false);
+  fftN(re, im, false);
   const br = new Float64Array(HS_M), bi = new Float64Array(HS_M);
   for (let k = 0; k < HS_NT; k++) {
     const yr = re[HS_K0 + k], yi = im[HS_K0 + k], xr_ = HS_X.re[k], xi = HS_X.im[k], d2 = xr_ * xr_ + xi * xi;
@@ -229,6 +289,63 @@ function pilotTrack(xr, L, frames, tAt) {
       PT.last = ang;
     }
     PT.next += PT_HOP; used++;
+  }
+  return used;
+}
+// Hum-band movement tracker: like pilotTrack, but the HB_N hum tones are read in short Hann windows of HB_WIN samples
+// (two 250 Hz cycles: neighbouring hum tones fall on the window's zeros, the map tones >= 6 bins away barely leak in),
+// every HB_HOP samples (250 per second). Same static removal, coarse profile and median phase step as pilotTrack.
+let HB_TW = null;
+function hbTrack(xr, L, frames, tAt) {
+  if (!HB_TW) {
+    HB_TW = [];
+    for (let j = 0; j < HB_N; j++) {
+      const k = HB_HK0 + HB_HSTEP * j, c = new Float32Array(HB_WIN), sn = new Float32Array(HB_WIN);
+      for (let n = 0; n < HB_WIN; n++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / HB_WIN); c[n] = w * Math.cos(2 * Math.PI * k * n / HB_P); sn[n] = w * Math.sin(2 * Math.PI * k * n / HB_P); }
+      HB_TW.push({ k, c, s: sn });
+    }
+  }
+  const bufStart = frames - L, fc = (HB_HK0 + HB_HSTEP * (HB_N - 1) / 2) * SR / HB_P;
+  if (!PT) PT = { cum: 0, hist: [], S: null, n: 0, last: null, next: Math.ceil(bufStart / HB_HOP) * HB_HOP };
+  if (PT.next < bufStart || PT.next > frames) { PT.next = Math.ceil(bufStart / HB_HOP) * HB_HOP; PT.last = null; }
+  if (!PT.last) { PT.base = PT.cum; PT.acc = null; }   // (re)start the per-slot totals from the current movement
+  let used = 0;
+  while (PT.next + HB_WIN <= frames) {
+    const s = PT.next - bufStart, ph0 = PT.next % HB_P, Br = new Float64Array(HB_N), Bi = new Float64Array(HB_N);
+    for (let j = 0; j < HB_N; j++) {
+      const { k, c, s: sn } = HB_TW[j]; let re = 0, im = 0;
+      for (let n = 0; n < HB_WIN; n++) { const v = xr[2 * (s + n)]; re += v * c[n]; im -= v * sn[n]; }
+      const a = -2 * Math.PI * k * ph0 / HB_P, ca = Math.cos(a), sa = Math.sin(a);
+      Br[j] = re * ca - im * sa; Bi[j] = re * sa + im * ca;
+    }
+    if (!PT.S) PT.S = { r: new Float64Array(HB_N), i: new Float64Array(HB_N) };
+    PT.n++; const al = Math.max(HB_HOP / (HB_TAU * SR), 1 / PT.n);
+    for (let j = 0; j < HB_N; j++) { PT.S.r[j] += al * (Br[j] - PT.S.r[j]); PT.S.i[j] += al * (Bi[j] - PT.S.i[j]); }
+    if (PT.n > 40) {
+      const dr = new Float64Array(PT_M), di = new Float64Array(PT_M), sr_ = new Float64Array(PT_M), si = new Float64Array(PT_M);
+      for (let j = 0; j < HB_N; j++) {
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (j + 1) / (HB_N + 1));
+        dr[j] = w * (Br[j] - PT.S.r[j]); di[j] = w * (Bi[j] - PT.S.i[j]); sr_[j] = w * PT.S.r[j]; si[j] = w * PT.S.i[j];
+      }
+      fft(dr, di, true); fft(sr_, si, true);
+      let d0 = 0, best = -1; for (let m = 0; m < PT_M; m++) { const v = sr_[m] * sr_[m] + si[m] * si[m]; if (v > best) { best = v; d0 = m; } }
+      const ang = new Float64Array(PT_M); for (let m = 0; m < PT_M; m++) ang[m] = Math.atan2(di[m], dr[m]);
+      if (PT.last) {
+        // each slot keeps its own unwrapped phase total; the movement is the median of those totals (not a sum of
+        // per-step medians, which drifts: 34 instead of 25 cm in the simulated move)
+        if (!PT.acc) PT.acc = new Float64Array(PT_M);
+        const tot = [];
+        for (let m = 0; m < PT_M; m++) {
+          let st = ang[m] - PT.last[m]; st -= 2 * Math.PI * Math.round(st / (2 * Math.PI)); PT.acc[m] += st;
+          const dd = Math.min((m - d0 + PT_M) % PT_M, (d0 - m + PT_M) % PT_M); if (dd > 6) tot.push(PT.acc[m]);
+        }
+        tot.sort((a, b) => a - b);
+        PT.cum = PT.base - tot[tot.length >> 1] * C / (2 * Math.PI * fc) / 2;
+        PT.hist.push([tAt(PT.next + HB_WIN / 2), PT.cum]); if (PT.hist.length > 2000) PT.hist.splice(0, 500);
+      }
+      PT.last = ang;
+    }
+    PT.next += HB_HOP; used++;
   }
   return used;
 }
@@ -554,7 +671,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 live pilot motion';
+const APP_BUILD = '2026-11-18 hum band';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -1137,10 +1254,10 @@ function frame(binM, binS, t0) {
       let raw, peak, noise, d, env, nb, T, env2, raw2, noise2, tA = null, tB = null, ptUsed = 0;
       if (HS) {
         ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T } = hsProfiles(xr, L, +$('range').value));
-        if (PINGS[$('ping').value].pilots) {
+        if (PINGS[$('ping').value].pilots || PINGS[$('ping').value].humband) {
           let cf = null, cage = 0; try { const ck = Native.sonarClock ? Native.sonarClock() : ''; if (ck) [cf, cage] = ck.split(',').map(Number); } catch (e) { }
           const nowP = performance.now();
-          ptUsed = pilotTrack(xr, L, frames, abs => cf === null ? nowP - (frames - abs) / SR * 1000 - 40 : nowP - cage + (abs - cf) / SR * 1000);
+          ptUsed = (PINGS[$('ping').value].humband ? hbTrack : pilotTrack)(xr, L, frames, abs => cf === null ? nowP - (frames - abs) / SR * 1000 - 40 : nowP - cage + (abs - cf) / SR * 1000);
         }
       }
       else if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
@@ -1325,7 +1442,7 @@ function frame(binM, binS, t0) {
       const nd = vals.length >= Math.min(2, nearHist.length) && vals.length ? vals[vals.length >> 1] : null;
       $('dist').textContent = nd === null ? '–' : nd.toFixed(2) + ' m';
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
-      const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
+      const ptTxt = PT && ptUsed && (PINGS[$('ping').value].pilots || PINGS[$('ping').value].humband) ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('status').textContent = (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
@@ -1381,9 +1498,11 @@ async function start(keep) {
     for (let i = 0; i < n; i++) { play[i] = P.amp * vol * PING_UP.I[i]; play[PERIOD + i] = P.amp * vol * PING_DN.I[i]; }
   } else if (P.tones) {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
-    const h = toneLoop(!!P.pilots); HS_X = h.X; play = new Float32Array(HS_P); loopLen = HS_P; PERIOD = 2 * HS_P;   // a reading every ~85 ms
+    if (P.humband) { HS_P = HB_P; HS_K0 = HB_MK0; HS_NT = HB_MK1 - HB_MK0 + 1; } else { HS_P = 2048; HS_K0 = 683; HS_NT = 256; }
+    const h = P.humband ? toneLoopHB() : toneLoop(!!P.pilots); HS_X = h.X; play = new Float32Array(HS_P); loopLen = HS_P; PERIOD = 2 * HS_P;   // a reading every ~80-85 ms
     for (let i = 0; i < HS_P; i++) play[i] = P.amp * vol * h.x[i];
-    logEv('tones', { n: HS_NT, k0: HS_K0, period: HS_P, crest: +h.crest.toFixed(2), pilots: P.pilots ? { step: HS_PSTEP, off: HS_POFF, gain: HS_PILOT, powerShare: +h.pilotShare.toFixed(3) } : null });
+    logEv('tones', { n: HS_NT, k0: HS_K0, period: HS_P, crest: +h.crest.toFixed(2), pilots: P.pilots ? { step: HS_PSTEP, off: HS_POFF, gain: HS_PILOT, powerShare: +h.pilotShare.toFixed(3) } : null,
+      humband: P.humband ? { cycle: HB_P, mapK: [HB_MK0, HB_MK1], humK0: HB_HK0, step: HB_HSTEP, n: HB_N, gain: HB_GAIN, win: HB_WIN, hop: HB_HOP, powerShare: +h.pilotShare.toFixed(3) } : null });
   } else {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     play = new Float32Array(PING.I.length);

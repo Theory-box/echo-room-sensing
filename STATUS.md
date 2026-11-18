@@ -745,3 +745,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   at 25–50 cm/s). Costs: hum takes ~32 % of the power, map tones −1.4 dB each and the map band 17.75–22 kHz (~4 cm detail
   instead of ~3) → map energy ≈ −3 dB vs Quiet tones; 1920 isn't a power of two (the app needs a radix-2/3/5 FFT).
   Not built yet.
+- **Build "hum band" (2026-11-18): ping "Quiet tones + hum band (experiment)".** Cycle 1920 samples (new any-length
+  DFT via Bluestein: error ~1e-12), map tones 17.75–22 kHz (171), 8 hum tones 15.25–17.0 kHz at 3×, peak taming
+  (crest 1.94, hum 32 % of power, map tones −1.6 dB vs Quiet tones). Live tracker hbTrack: 384-sample Hann windows
+  every 192 samples, running static average (HB_TAU 3 s), coarse 64-slot profile, median of per-slot phase totals;
+  status line shows movement; logged as pm/pmh. In-app checks: map sim 12/16 walls, but the wall echo caught in only
+  34–40 % of readings (plain tones 88–96 %) → map clearly weaker in sim. Tracker on a second simulated 25 cm move:
+  19–41 cm depending on how the static part is estimated (whole-recording mean / running 3 s / no decay) → NOT robust
+  yet; the first sim's 24–25 cm was fragile. Installed for a real recording (raw audio 40 s) to tune offline.
