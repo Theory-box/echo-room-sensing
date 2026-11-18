@@ -387,7 +387,7 @@ const RB = 0.05, NRB = Math.ceil(MEXT / RB);                         // range bi
 let mapL = new Float32Array(MN * MN), ringFrac = new Float32Array(NRB * 12), covered = 0;
 const mapCv = document.createElement('canvas'); mapCv.width = mapCv.height = MN;
 const mapCtx = mapCv.getContext('2d'), mapImg = mapCtx.createImageData(MN, MN);
-function clearMap() { mapL.fill(0); ringFrac.fill(0); covered = 0; clearWalls(); }
+function clearMap() { mapL.fill(0); ringFrac.fill(0); covered = 0; ringWiped = new Set(); clearWalls(); }
 const popc = v => { let c = 0; while (v) { c += v & 1; v >>= 1; } return c; };
 function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
   const i = Math.floor(x / MCELL + MN / 2), j = Math.floor(MN / 2 - y / MCELL);
@@ -396,12 +396,27 @@ function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
 }
 // how loud the click is toward bearing phi (deg, 0 = where the bottom edge points): strong ahead, weak behind (body)
 // floor/ceiling: echo at this distance in most clicks, in >= 75% of the 30-degree sectors turned through
-function isRing(r) {
+function isRing(r, frac = 0.75) {
   const nCov = popc(covered);
   if (nCov < 8 || r <= 0.6 || r >= 2.2) return false;
   const rb = Math.round(r / RB); let n = 0;
   for (let sc = 0; sc < 12; sc++) if ((covered >> sc) & 1 && ringFrac[rb * 12 + sc] >= 0.5) n++;
-  return n >= 0.75 * nCov;
+  return n >= frac * nCov;
+}
+// A distance found to be a ring (floor/ceiling) after its echoes were already painted: wipe that circle once
+// (2026-11-18: in Mid the ceiling at ~1.4-1.7 m stayed on the map as a ring from the first seconds of turning).
+let ringWiped = new Set();
+function wipeRings() {
+  if (popc(covered) < 8) return;
+  const cx = SLM ? SLM.x : 0, cy = SLM ? SLM.y : 0;
+  for (let rb = Math.ceil(0.6 / RB); rb < 2.2 / RB; rb++) {
+    if (ringWiped.has(rb) || !isRing(rb * RB)) continue;
+    ringWiped.add(rb); const R0 = rb * RB + ARM;
+    for (let j = 0; j < MN; j++) for (let i = 0; i < MN; i++) {
+      const x = (i + 0.5 - MN / 2) * MCELL, y = (MN / 2 - j - 0.5) * MCELL, d = Math.hypot(x - cx, y - cy);
+      if (Math.abs(d - R0) < 0.08) { const k = j * MN + i; if (mapL[k] > 0) mapL[k] = 0; }
+    }
+  }
 }
 const beamW = phi => { const c = Math.cos(phi * Math.PI / 180); return c > 0 ? 0.06 + 0.94 * c ** 4 : 0.06; };
 function updateMap(theta, kept, mask, maxR) {
@@ -417,7 +432,7 @@ function updateMap(theta, kept, mask, maxR) {
   for (const q of kept) {
     // floor/ceiling (not timed as straight ahead: a wall you point at can sit at the floor's distance): kept off the
     // map, and it doesn't stop the "seen through" clearing either
-    if (q.dir !== 'ahead' && isRing(q.r)) continue;
+    if (isRing(q.r) && (q.dir !== 'ahead' || isRing(q.r, 0.9))) continue;   // ahead: only if heard nearly all round
     if (withYou(q.r)) continue;                          // stayed at the same distance while you walked: floor/ceiling/carried
     if (q.dir !== 'behind') nearAhead = Math.min(nearAhead, q.r);
     const strength = Math.min(1, Math.max(0.3, (q.l - (best - 24)) / 24));
@@ -487,7 +502,7 @@ function ghostOf(w) {
 }
 const wallHidden = w => isRing(w.r) || floorLike(w.r) || ghostOf(w);
 let RUNS = [], WALLS = [], rcdDone = [], UH = 0, UHlast = null, runNext = 1, UHlo = 0, UHhi = 0;
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; }
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
 // D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
@@ -496,34 +511,34 @@ function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []
 // Offline on 11 same-spot sweeps: 8 consistent rooms (~2.7 x 2.9 m); sim: exact box, missing wall -> clutter-level support.
 const RB_TOL = 0.04, RB_FACE = 30, RB_MIN = 0.35, RB_MAX = 5.0, RB_N = 6000;
 let RB_RINGN = 3;   // echoes per sector for a distance to count as heard in that direction (ring test)
-let RBOX = { h: [], r: [], last: 0, fit: null };
+let RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null };   // px, py = where you stood (room frame)
 // Rings: a distance heard in nearly every direction (>= 9 of 12 sectors, once you've turned through >= 10 of them) is
 // not a wall (a wall is only heard while you face it) -- floor, ceiling, or an artefact such as the pilots mode's
 // ~4.4 m ring (2026-11-18: it made the box 8.9 x 8.9 m). Echoes within +-3 cm of a ring distance are left out of the fit.
-function ringFree(h, r) {
+function ringFree(h, r, px = null, py = null) {
   const secs = new Map(), covered = new Set();
   for (let i = 0; i < h.length; i++) {
     const sc = Math.floor((((h[i] % 360) + 360) % 360) / 30), b = Math.round(r[i] / 0.03); covered.add(sc);
     for (const bb of [b - 1, b, b + 1]) { let st = secs.get(bb); if (!st) secs.set(bb, st = new Map()); st.set(sc, (st.get(sc) || 0) + 1); }
   }
-  if (covered.size < 10) return { h, r, rings: [] };
+  if (covered.size < 10) return { h, r, px, py, rings: [] };
   // a ring repeats MANY times in every direction (the pilots artefact: ~20 per 30-degree sector); stray echoes at a wall's
   // distance turning up once or twice in most directions must not count (that hid real walls in 2 sessions)
   const ring = new Set(); for (const [b, st] of secs) { let k = 0; for (const c of st.values()) if (c >= RB_RINGN) k++; if (k >= 9) ring.add(b); }
-  const H = [], Rr = [];
-  for (let i = 0; i < h.length; i++) if (!ring.has(Math.round(r[i] / 0.03))) { H.push(h[i]); Rr.push(r[i]); }
-  return { h: H, r: Rr, rings: [...ring].sort((x, y) => x - y).map(b => +(b * 0.03).toFixed(2)) };
+  const H = [], Rr = [], X = [], Y = [];
+  for (let i = 0; i < h.length; i++) if (!ring.has(Math.round(r[i] / 0.03))) { H.push(h[i]); Rr.push(r[i]); if (px) { X.push(px[i]); Y.push(py[i]); } }
+  return { h: H, r: Rr, px: px ? X : null, py: px ? Y : null, rings: [...ring].sort((x, y) => x - y).map(b => +(b * 0.03).toFixed(2)) };
 }
 function roomFit() {
-  const rf = ringFree(RBOX.h, RBOX.r), h = rf.h, r = rf.r, n = h.length, nb = Math.round((RB_MAX - RB_MIN) / 0.01), win = Math.round(RB_TOL / 0.01);
+  const rf = ringFree(RBOX.h, RBOX.r, RBOX.px, RBOX.py), h = rf.h, r = rf.r, PX = rf.px, PY = rf.py, n = h.length, nb = Math.round((RB_MAX - RB_MIN) / 0.01), win = Math.round(RB_TOL / 0.01);
   let best = null;
   for (let rot = -45; rot < 45; rot++) {
     const D = [], votes = []; let tot = 0;
     for (let w = 0; w < 4; w++) {
-      const nrm = rot + 90 * w, hist = new Int32Array(nb);
+      const nrm = rot + 90 * w, hist = new Int32Array(nb), sn = Math.sin(nrm * Math.PI / 180), cn = Math.cos(nrm * Math.PI / 180);
       for (let i = 0; i < n; i++) {
         const off = angDiff(h[i], nrm); if (Math.abs(off) >= RB_FACE) continue;
-        const b = Math.round((r[i] + ARM * Math.cos(off * Math.PI / 180) - RB_MIN) / 0.01); if (b >= 0 && b < nb) hist[b]++;
+        const b = Math.round((r[i] + ARM * Math.cos(off * Math.PI / 180) + (PX ? sn * PX[i] + cn * PY[i] : 0) - RB_MIN) / 0.01); if (b >= 0 && b < nb) hist[b]++;
       }
       let run = 0, bi = 0, bv = -1;   // count within +-win bins of each bin (sliding window)
       for (let b = 0; b < nb + win; b++) {
@@ -558,6 +573,12 @@ function slLock(f) {
     N: [0, 1].map(a => { const r = (f.rot + 90 * a) * Math.PI / 180; return [Math.sin(r), Math.cos(r)]; }) };
 }
 function slWalking(now) { return now < wkUntil; }
+function slRefit(f) {
+  const L = SLM, turned = Math.abs(angDiff(f.rot, L.rot)) > 20;
+  L.rot = f.rot; L.D = f.D.slice(); L.sup = f.votes.slice(); L.clutter = Math.max(1, f.clutter);
+  L.N = [0, 1].map(a => { const r = (f.rot + 90 * a) * Math.PI / 180; return [Math.sin(r), Math.cos(r)]; });
+  if (turned) { L.pend = [[], []]; L.rp = [[], []]; L.acc = [[], []]; }
+}
 // Moves with you (2026-11-18, the user's idea): walls and furniture stay put, so walking toward them changes their echo
 // distance. An echo still at the same distance (+-2 cm) after you walked >= 20 cm along the way you face (same heading
 // +-25 deg) is floor, ceiling, or something you carry -- either way not the room. A distance caught 3 times is kept off
@@ -746,7 +767,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 steady map';
+const APP_BUILD = '2026-11-18 steady map 2';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -855,7 +876,7 @@ function motionTick(yaw) {
     const km = 1 - Math.exp(-dt / 3); MO.mE += km * (aE - MO.mE); MO.mN += km * (aN - MO.mN);
     const dec = Math.exp(-dt / TAU_V);
     MO.hpE = MO.hpE * dec + (aE - MO.mE) * dt; MO.hpN = MO.hpN * dec + (aN - MO.mN) * dt; MO.n++;
-    if (MO.raw.length < 200) MO.raw.push([t, aE, aN]);
+    if (MO.raw.length < 200) MO.raw.push([t, aE, aN, isFinite(aU) ? aU : 0]);
     ACCH.push([t, aE, aN]); while (ACCH.length && t - ACCH[0][0] > 5000) ACCH.shift();
   }
   const dty = (now - MO.ty) / 1000;
@@ -1500,7 +1521,7 @@ function frame(binM, binS, t0) {
           q.mo ? [+q.mo.uf.toFixed(2), +q.mo.us.toFixed(2), +q.mo.zf.toFixed(1), +q.mo.zs.toFixed(1), q.mo.n, +(100 * q.mo.fwdRms).toFixed(1), +(100 * q.mo.res).toFixed(1)] : null,
           q.rd ? [q.rd.v, +q.rd.uf.toFixed(2), +q.rd.us.toFixed(2), +q.rd.z.toFixed(1), q.rd.n, +(100 * q.rd.mot).toFixed(2)] : null]), mn: mnClicks, fr: frames,
         tc: Math.round(t0 - ageMs), cs: clkSrc, pm: PT && ptUsed ? +(1000 * PT.cum).toFixed(2) : null, pmn: ptUsed,
-        pmh: PT && ptUsed ? PT.hist.slice(-ptUsed).map(h => [Math.round(h[0]), +(1000 * h[1]).toFixed(2)]) : undefined, ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [],
+        pmh: PT && ptUsed ? PT.hist.slice(-ptUsed).map(h => [Math.round(h[0]), +(1000 * h[1]).toFixed(2)]) : undefined, ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3), +a[3].toFixed(3)]) : [],
         pv: pvNow ? [+(100 * (pvNow.e * Math.sin(psiNow) + pvNow.n * Math.cos(psiNow))).toFixed(1), +(100 * (pvNow.e * Math.cos(psiNow) - pvNow.n * Math.sin(psiNow))).toFixed(1)] : null, na: MO ? MO.n : 0,
         nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]), p: tp.rawDb });
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
@@ -1508,14 +1529,17 @@ function frame(binM, binS, t0) {
       const mapMode = $('dirf').value === 'map';
       // Map: all detections (it accumulates evidence over time itself -- random junk doesn't build up, faint real walls do)
       if (mapMode) {
-        updateMap(theta, kept, mk, mR); updateWalls(theta, kept, t0);
+        updateMap(theta, kept, mk, mR); wipeRings(); updateWalls(theta, kept, t0);
         let rbNew = false, slNew = false, slRow = null;
         if ($('roombox').value === 'on') {
-          for (const q of kept) if (q.tconf && q.r > RB_MIN) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); }
-          if (RBOX.h.length > RB_N) { RBOX.h.splice(0, RBOX.h.length - RB_N); RBOX.r.splice(0, RBOX.r.length - RB_N); }
-          if (!SLM && RBOX.h.length >= 200 && t0 - RBOX.last > 1000) { RBOX.fit = roomFit(); RBOX.last = t0; rbNew = true;
-            if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; } }
-          else if (SLM) {
+          for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); }
+          if (RBOX.h.length > RB_N) { const k = RBOX.h.length - RB_N; for (const a of ['h', 'r', 'px', 'py']) RBOX[a].splice(0, k); }
+          if (RBOX.h.length >= 200 && t0 - RBOX.last > 1000 && !(SLM && slWalking(performance.now()))) {
+            RBOX.fit = roomFit(); RBOX.last = t0; rbNew = true;
+            if (!SLM) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; } }
+            else slRefit(RBOX.fit);   // the locked room keeps improving from every echo (each corrected for where you stood)
+          }
+          if (SLM) {
             const wk = slWalking(performance.now());
             // floor/ceiling (heard all round, or staying put while you walk) would look like a wall closer than the real one
 // while walking, wall echoes move, so the echo tracker rarely confirms them: use all echoes then (the gate and the
@@ -1668,7 +1692,7 @@ $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
 $('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) clearAcc(); showViewHelp(); saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('bands').onchange = () => { if (running) { stop(); start(true); } };
-$('roombox').onchange = () => { SLM = null; if (!running) return; RBOX = { h: [], r: [], last: 0, fit: null }; };
+$('roombox').onchange = () => { SLM = null; if (!running) return; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; };
 
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(true); } };

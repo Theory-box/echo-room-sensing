@@ -816,3 +816,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   the way you face is floor / ceiling / carried; caught 3 times -> kept off the map and out of the tracker (a constant
   floor echo otherwise looked like a wall 29 cm closer and pinned the position). Sim: found the floor, no walls.
   Logs: slk (lock), sl per frame [x, y, walking, bounce rms, matches, moves-with-you distances].
+- **Steady map, first real tests (2026-11-18 17:30, 3 sessions):** walking was never detected (up-down bounce peaked
+  ~0.5 vs threshold 0.7; no clear step rhythm in the logged forward/sideways acceleration either), so the tracker
+  treated you as standing; the box froze at its first lock, sometimes with a weak wrong far wall. Fixed: the box keeps
+  refitting after the lock (each echo corrected for where you stood). The ceiling ring (Mid mode, 17:04, previous build:
+  1.44 m in all 12 directions, ~45% of readings) got through because "ahead"-timed echoes skipped the ring filter and
+  echoes painted before the ring was recognised stayed: now dropped when heard nearly all round, and wiped once found.
+  Vertical acceleration now logged (ac 4th value) to set walking detection from data.
+- **Particle filter (MCL) against the box, no walking flag: worse** (same-spot drift 6-87 cm vs 0-10; sim walks 8-44 cm
+  median vs 3-20). Note: the Kalman tracker's same-spot steadiness is partly from using few echoes (0 accepted on
+  140553). The 4-wall box is too coarse a model -- furniture echoes consistently from where the box has nothing. Next
+  idea: match each reading against the whole accumulated echo map (scan matching), so furniture becomes a landmark.
