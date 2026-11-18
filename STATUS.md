@@ -802,3 +802,17 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
 - **Ping list tidied (2026-11-18):** "3-mic test" and "Hum" hidden from the list (code kept for later tests; a saved
   setting pointing at them falls back to the default). Shown: Strong, Mid, Quiet (long), Full sweep, Quiet tones,
   Quiet tones + pilots.
+- **Steady map (2026-11-18, test, under Room box = On):** after a full turn (11 of 12 directions) the room box locks;
+  every echo heard while facing a locked wall then measures your position (Kalman filter, room frame). You stay at the
+  centre: the echo map, wall lines and box are drawn shifted by your position. Standing: echoes must agree within 5 cm
+  (a gate that widened with uncertainty let wrong walls drag the position 46-173 cm on same-spot sweeps; fixed gate:
+  0-10 cm, also in the app code on 8 real sweeps, no false jumps). Walking (vertical bounce rms > 0.7 m/s2; new native
+  up-acceleration value) widens the gate with time since the wall was last heard, a jump needs a second agreeing echo,
+  all echoes are used (moving echoes are rarely "confirmed"), and a recovery re-snaps when rejected echoes agree
+  (only while walking / 5 s after: standing it made 67-99 cm false jumps from furniture). App sim (real code, synthetic
+  audio, floor echo): walks of 0.6-1 m tracked to 2-5 cm median after stopping, lagging 20-45 cm mid-walk. Weak: very
+  fast wide sweeps while walking; slow circling (~20 cm in offline sim). Walls not refined from new spots yet.
+- **Moves with you (2026-11-18, user's idea):** an echo still at the same distance (+-2 cm) after walking >= 20 cm along
+  the way you face is floor / ceiling / carried; caught 3 times -> kept off the map and out of the tracker (a constant
+  floor echo otherwise looked like a wall 29 cm closer and pinned the position). Sim: found the floor, no walls.
+  Logs: slk (lock), sl per frame [x, y, walking, bounce rms, matches, moves-with-you distances].

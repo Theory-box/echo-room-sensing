@@ -69,7 +69,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     // phone acceleration (gravity removed) turned into the room's horizontal frame (east, north) with the same rotation
     // as the heading; ring of {timestamp ns, east, north} for the page's short-range motion estimate
     private final long[] accT = new long[1024];
-    private final float[] accE = new float[1024], accN = new float[1024];
+    private final float[] accE = new float[1024], accN = new float[1024], accU = new float[1024];
     private int accN_ = 0;          // samples written in total
     private int accRead = 0;        // samples already handed to the page
     private volatile boolean rotOK = false;
@@ -363,6 +363,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     accT[k] = e.timestamp;
                     accE[k] = rotMat[0] * x + rotMat[1] * y + rotMat[2] * z;
                     accN[k] = rotMat[3] * x + rotMat[4] * y + rotMat[5] * z;
+                    accU[k] = rotMat[6] * x + rotMat[7] * y + rotMat[8] * z;
                     accN_++;
                 }
                 break;
@@ -637,7 +638,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 for (int i = accRead; i < accN_; i++) {
                     int k = i % accT.length;
                     if (sb.length() > 0) sb.append(';');
-                    sb.append(String.format(Locale.US, "%.1f,%.4f,%.4f", (now - accT[k]) / 1e6, fin(accE[k]), fin(accN[k])));
+                    sb.append(String.format(Locale.US, "%.1f,%.4f,%.4f,%.4f", (now - accT[k]) / 1e6, fin(accE[k]), fin(accN[k]), fin(accU[k])));
                 }
                 accRead = accN_;
             }
