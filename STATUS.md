@@ -727,3 +727,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   The 16-tone hum (250 Hz apart → 192-sample, 4 ms blocks): 20.5 / 21.4 / 23.2 / 23.3 cm — speed-independent, 82–93 %
   (the rest: slot median with static clutter). So the fix is wide-spaced motion tones read with short windows, kept
   apart from the dense map tones (separate band with a guard gap, or the other speaker).
+- **Hum band design, first simulations (2026-11-18): not working yet.** Dense map tones 17.9–22 kHz (2048-sample cycle,
+  23.4 Hz apart) + a few hum tones below, which must also repeat every 2048 samples → hum spacing a multiple of
+  23.4 Hz (375 Hz → 128-sample blocks; 257.8 Hz → 186.2 samples, not whole). Known 25 cm move: 4 hum tones read
+  −46…−58 cm; 6 tones −5…−21 (−20.8 to +85 depending on speed / filtering with the robust slot tracker); 12 tones at
+  257.8 Hz −25…−28 unfiltered but −54…−59 with a band filter (block not a whole cycle). Hum alone without map tones:
+  −19…−23 cm. Causes: map-tone leakage into the short hum windows, and hum spacings that don't give whole cycles per
+  block. Structural fix to try: make the map cycle 1920 samples (25 Hz apart, wrap at 6.9 m) so the proven 250 Hz hum
+  (192-sample blocks, 82–93 % in sim) fits exactly, plus a band filter/taper against map-tone leakage. Note: a second
+  speaker would NOT avoid the frequency separation (the mic hears both speakers); it only avoids sharing power.
