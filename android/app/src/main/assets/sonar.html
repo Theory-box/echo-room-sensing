@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="mic3test">3-mic test (records; Full sweep)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -89,6 +89,10 @@ const PINGS = {
   // it lands before it, outside the echo window); and a speaker equalizer -- cost 2-8 dB of echo strength on this
   // phone and stepped band weights raised range sidelobes. The code for both remains (flags updown / eq).
   wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
+  // TEST (2026-11-18): Full sweep (every pitch 2-22 kHz in one recording) with ALL THREE mics recorded, 15 clicks/s fixed,
+  // 40 s of raw audio saved -- for offline study of what the extra mics add (low band: timing works; quiet band; floor
+  // vs wall by loudness). The live view runs as Full sweep on the first two mics.
+  mic3test: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000, mics3: true, rate: 15 },
   // EXPERIMENT (2026-11-18): steady hum of HUM_N tones, 17.0-20.75 kHz in 250 Hz steps, played continuously. Every
   // reflection then arrives as a steady wave whose phase shifts as the phone moves (one full turn per ~9 mm of
   // path toward a surface), measured 48000 times a second instead of once per click -- the "hologram" idea, for
@@ -580,7 +584,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 hum band removed';
+const APP_BUILD = '2026-11-18 three mics';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -834,7 +838,7 @@ function drawAscan(lev, kept, binM, maxR, mask, thr) {
 // = ~19.9 samples at 48 kHz. Holding the bottom edge forward: an echo from straight ahead reaches the bottom mic
 // first (lag ~ +20), from the side about equal (~0), from behind the back mic first (~ -20). Left/right can't be told.
 const MIC_LAG = 19.9;
-const adaptivePing = () => /^quiet|^wide/.test($('ping').value);
+const adaptivePing = () => /^quiet|^wide|^mic3/.test($('ping').value);
 function envOf(x, tpl = PING) {
   const ci = xcorr(x, tpl.I), cq = xcorr(x, tpl.Q), env = new Float64Array(x.length);
   for (let i = 0; i < x.length; i++) env[i] = Math.hypot(ci[i], cq[i]);
@@ -1375,7 +1379,7 @@ function humFrame(t0) {
 async function start(keep) {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
   const P = PINGS[$('ping').value];
-  const rate = +$('rate').value;
+  const rate = P.rate || +$('rate').value;
   PERIOD = Math.round(SR / rate);
   // long sweep: half the period, but leave room for the whole range + a noise stretch (fast clicks / 7 m range)
   const needNb = Math.round(2 * +$('range').value / C * SR);
@@ -1416,11 +1420,13 @@ async function start(keep) {
     play = new Float32Array(PING.I.length);
     for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   }
+  try { if (Native.setMicChannels) Native.setMicChannels(P.mics3 ? 3 : 2); } catch (e) { }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
   running = true; lastFrames = -1; staleSince = 0; motionReset(); ptReset(); MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map(); resetTracks();
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
-  logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
+  let micsGot = 2; try { if (Native.micChannels) micsGot = Native.micChannels(); } catch (e) { }
+  logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen, micsRecorded: micsGot });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
   $('go').textContent = 'Stop';
   await sleep(300);
@@ -1431,9 +1437,10 @@ function saveLog(partial) {
   let ok = false;
   try {
     Native.newSession();
-    // last 20 s of both mics as a 32-bit float WAV (ch1 bottom, ch2 back), for checking the processing offline
+    // last 20 s (40 s for tone modes) of the mics as a 32-bit float WAV (ch1 bottom, ch2 back, ch3 third mic if
+    // "Mics recorded: 3"), for checking the processing offline; the result string ends with the channel count
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || HS ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || HS || PINGS[$('ping').value].mics3 ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
@@ -1463,6 +1470,7 @@ $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
 $('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('bands').onchange = () => { if (running) { stop(); start(true); } };
+
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(true); } };
 drawFrame(null, 5);

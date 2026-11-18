@@ -773,3 +773,9 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   phone sway → motion correction from ANY source (hum, pilots, echoes) can't steady distances much. Motion still
   matters for front/back (less needed: body shadow) and for multi-spot mapping. Lead to check: pilots sessions showed
   much lower raw wobble (0.36–0.50 cm vs 1.2–1.8) on few track-seconds (11–33).
+- **Build "three mics" (2026-11-18): ping "3-mic test (records; Full sweep)".** Full sweep 2–22 kHz at a fixed 15 clicks/s
+  with all three mics recorded (AudioRecord channel index mask 0x7; normal modes keep the CHANNEL_IN_STEREO setup
+  unchanged); the live view runs on the first two channels; 40 s of raw audio saved as a 3-channel float WAV (save
+  result ends with the channel count; the start event logs micsRecorded). For offline study: low-band two-mic timing,
+  the third mic as a close pair with the back mic, floor-vs-wall by loudness. Sim: existing modes unchanged; the test
+  mode can't be judged by the harness (fixed 15/s vs the harness's rates).

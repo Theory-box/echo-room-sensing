@@ -85,6 +85,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     private float[] ring;                 // interleaved stereo
     private long ringFrames = 0;          // total frames written
     private int ringCap = 0;              // capacity in frames
+    private volatile int micReq = 2;      // channels the page asks for: 2 (bottom + back) or 3 (all mics, test)
+    private int nch = 2;                  // channels actually recorded (ring is interleaved by nch)
     private final Object ringLock = new Object();
     private volatile int sonarGen = 0;             // each start gets a new generation; an old record thread exits on mismatch
     private int savedVolume = -1;         // user's media volume before the radar started (restored on stop)
@@ -148,8 +150,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             if (speaker != null) sonarTrack.setPreferredDevice(speaker);
             final AudioRecord rec = new AudioRecord.Builder()
                     .setAudioSource(MediaRecorder.AudioSource.UNPROCESSED)
-                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-                            .setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build())
+                    .setAudioFormat(micReq == 3
+                            ? new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(sr).setChannelIndexMask(0x7).build()
+                            : new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build())
                     .setBufferSizeInBytes(sr * 2 * 4)
                     .build();
             recOrNull = rec;
@@ -157,7 +160,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             synchronized (ringLock) {
                 ringCap = sr * 40;   // 40 s: live view reads the last ~0.5 s; the rest is kept for saveSessionRaw (hum test: 40 s)
                 tsFrame = -1;
-                ring = new float[ringCap * 2];
+                nch = rec.getChannelCount() >= 3 ? 3 : 2;
+                ring = new float[ringCap * nch];
                 ringFrames = 0;
             }
             sonarOn = true;
@@ -166,7 +170,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             sonarTrack.play();
             recOrNull = null;   // owned by the thread from here on
             sonarThread = new Thread(() -> {
-                float[] buf = new float[1024 * 2];
+                final int ch = nch;
+                float[] buf = new float[1024 * ch];
                 long lastVol = 0;
                 final AudioTimestamp ats = new AudioTimestamp();
                 try {
@@ -189,11 +194,10 @@ public class MainActivity extends Activity implements SensorEventListener {
                         if (n == 0) continue;
                         synchronized (ringLock) {
                             if (myGen != sonarGen) break;   // a newer start owns the ring now
-                            int frames = n / 2;
+                            int frames = n / ch;
                             for (int f = 0; f < frames; f++) {
                                 int pos = (int) ((ringFrames + f) % ringCap);
-                                ring[2 * pos] = buf[2 * f];
-                                ring[2 * pos + 1] = buf[2 * f + 1];
+                                for (int c = 0; c < ch; c++) ring[ch * pos + c] = buf[ch * f + c];
                             }
                             ringFrames += frames;
                         }
@@ -252,8 +256,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             long start = ringFrames - frames;
             for (int i = 0; i < frames; i++) {
                 int pos = (int) ((start + i) % ringCap);
-                out[2 * i] = ring[2 * pos];
-                out[2 * i + 1] = ring[2 * pos + 1];
+                out[2 * i] = ring[nch * pos];
+                out[2 * i + 1] = ring[nch * pos + 1];
             }
         }
         ByteBuffer bb = ByteBuffer.allocate(out.length * 4).order(ByteOrder.LITTLE_ENDIAN);
@@ -267,7 +271,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             if (ring == null || ringFrames < frames) return "0|";
             float[] out = new float[frames];
             long start = ringFrames - frames;
-            for (int i = 0; i < frames; i++) out[i] = ring[2 * (int) ((start + i) % ringCap) + ch];
+            for (int i = 0; i < frames; i++) out[i] = ring[nch * (int) ((start + i) % ringCap) + ch];
             ByteBuffer bb = ByteBuffer.allocate(frames * 4).order(ByteOrder.LITTLE_ENDIAN);
             bb.asFloatBuffer().put(out);
             return ringFrames + "|" + Base64.encodeToString(bb.array(), Base64.NO_WRAP);
@@ -641,6 +645,10 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
         /** Capture clock: "frame,ageMs" = recording frame number and how long ago (ms) it was captured, or "" if the
          *  device gives no capture timestamps. Same clock as the sensor timestamps. */
+        /** Mics to record from the next sonarStart: 2 (normal) or 3 (all mics, test). Returns what will be asked for. */
+        @JavascriptInterface public int setMicChannels(int n) { micReq = n == 3 ? 3 : 2; return micReq; }
+        /** Channels the current recording actually has. */
+        @JavascriptInterface public int micChannels() { return nch; }
         @JavascriptInterface public String sonarClock() {
             synchronized (ringLock) {
                 if (tsFrame < 0) return "";
@@ -722,19 +730,19 @@ public class MainActivity extends Activity implements SensorEventListener {
             synchronized (ringLock) {
                 if (ring == null || ringFrames == 0) return "no recording";
                 n = (int) Math.min(Math.min(ringFrames, ringCap), (long) seconds * 48000);
-                end = ringFrames; out = new float[n * 2];
-                for (int i = 0; i < n; i++) { int pos = (int) ((end - n + i) % ringCap); out[2 * i] = ring[2 * pos]; out[2 * i + 1] = ring[2 * pos + 1]; }
+                end = ringFrames; out = new float[n * nch];
+                for (int i = 0; i < n; i++) { int pos = (int) ((end - n + i) % ringCap); for (int c = 0; c < nch; c++) out[nch * i + c] = ring[nch * pos + c]; }
             }
             int dataBytes = out.length * 4;
             ByteBuffer bb = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN);
             bb.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataBytes).put("WAVE".getBytes(StandardCharsets.US_ASCII));
-            bb.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 3).putShort((short) 2).putInt(48000)
-              .putInt(48000 * 2 * 4).putShort((short) 8).putShort((short) 32);
+            bb.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 3).putShort((short) nch).putInt(48000)
+              .putInt(48000 * nch * 4).putShort((short) (nch * 4)).putShort((short) 32);
             bb.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataBytes);
             for (float v : out) bb.putFloat(v);
             try (FileOutputStream f = new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName))) {
                 f.write(bb.array());
-                return fileName + "|" + end + "|" + n;
+                return fileName + "|" + end + "|" + n + "|" + nch;
             } catch (IOException e) {
                 return "save failed: " + e;
             }
