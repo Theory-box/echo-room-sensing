@@ -786,3 +786,13 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   per fit as `rb`. On the 14:05 sweep the app's fit (0.84 / 1.53 / 1.52 / 1.31 m) differs from the offline one
   (0.98 / 1.53 / 1.81 / 1.31) on two walls whose top candidates had nearly equal support → the box can flip between close
   candidates. Not yet tried live.
+- **Room box on the phone (2026-11-18 16:16–16:21) + ring fix.** Main modes, same spot: Quiet 1 band 2.79 × 2.82 m,
+  Quiet tones 2.77 × 2.85, Quiet tones 4 bands 2.60 × 2.84, Quiet 4 bands 2.61 × 2.80 (three walls agree within a few
+  cm: ~0.93 / 1.5–1.6 / 1.21–1.28 m; the fourth alternates 1.65 / 1.9 m — maybe furniture in front of a wall); user:
+  "room dimensions do seem pretty accurate". Failures: Full sweep at 10 % volume (2.91 × 3.35, one weak jumping wall);
+  pilots at 100 % (8.9 × 8.9: the pilots mode has an artefact ring at ~4.2–4.7 m heard in all 12 sectors, hundreds of
+  times; also in the 14:19 pilots session; not in Quiet / Quiet tones). Fix: echoes at a distance heard ≥ 3 times in
+  each of ≥ 9 of 12 sectors (after ≥ 10 sectors turned) are left out of the box fit (logged `rbr`). Replay of 15
+  same-spot sweeps: both pilots sessions 8.9 × 8.9 → 2.73 × 2.90 / 2.77 × 2.83 m; all others unchanged. (Without the
+  "≥ 3 per sector" rule two sessions got worse; at 5 or 8 per sector a pilots session failed again.) Pilots artefact
+  itself not investigated.
