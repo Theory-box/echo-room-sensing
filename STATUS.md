@@ -391,3 +391,15 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   (the folded reading smears; walking needs unfolded tracking later). Not yet used for display or the map.
 - Holding the phone: not learned (user decision). Rule of thumb: hold it in front with a relaxed arm; side holds blur
   walls ~10–20% at 2–4 m. Revisit only if micronavigation shows a big gain from knowing the hold.
+- **First real test of approach speed (2026-11-17, Quiet, 15 clicks/s, walk toward a wall and back, then a turn):**
+  echoes fixed relative to the phone (body/hand 0.34 m, floor ~0.85 m) read 0 at high consistency all session; walking
+  toward the wall read +12…+15 cm/s while its distance fell 1.75 → 1.13 m (~18 cm/s), standing still 0, walking back
+  −12…−13. Problem: 95% of phase-based speeds sat on multiples of the 13.5 cm/s wrap quantum (Quiet at 15/s), and some
+  still walls read ±13.5 → the per-step envelope unwrapping is too noisy in a real room.
+- **Fix:** whole-turn choice from (1) the echo's recent track (matched within 6 cm, < 0.6 s; dropped if the envelope slope
+  disagrees by a full turn) else (2) the least-squares envelope slope over all clicks in the reading; phase steps taken
+  within half a turn of that prediction. Log source 't' = turn from the track. Harsher simulation (moving clutter next to
+  the wall, more noise): new version correct for 0, ±15, 25, 6, 5 cm/s (Quiet) and 30 (Full sweep); the old version
+  failed 25 cm/s completely and partly −15. The exact real symptom wasn't reproduced in simulation → needs a real retest.
+- Click rate: wrap quantum = λ/2 per click → lower rates make speed MORE ambiguous (Quiet 3.6 cm/s at 4/s, 13.5 at 15/s;
+  Full sweep low part 14 at 4/s, 54 at 15/s). Use 15/s for motion work.

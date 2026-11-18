@@ -382,7 +382,7 @@ function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' :
 // change comes from the envelope peak (parabolic, ~1 mm); the phase refines it and the coarse value picks the 2*pi turn.
 // Result per echo: q.v (m/s, + = getting closer) and q.vq (0..1, how consistent the phase steps were).
 // Uses the low part of the Full sweep (2-8 kHz, fc 5 kHz: one phase turn = 3.4 cm) or the whole ping otherwise.
-let MN_TPL = null, MN_FC = 0;
+let MN_TPL = null, MN_FC = 0, MN_TRACKS = [];   // tracks: recent per-echo speeds, to pick the right phase turn
 function clickC(xr, start, len, tpl) {     // complex matched-filter output of ONE click on mic 1, delays 0..len-1
   const n = len + tpl.I.length, seg = new Float32Array(n);
   for (let i = 0; i < n; i++) seg[i] = xr[2 * (start + i)] || 0;
@@ -397,7 +397,8 @@ function echoMotion(xr, L, d, kept, nb) {
   // per click: integer envelope peak k0 near the echo, and the phase there. At the peak the phase only reflects the
   // fractional part of the delay (one carrier period = SR/fc samples per 2*pi), so tau_j = k0 + MN_SIGN*phase*Pc/(2*pi)
   // up to whole carrier periods; the parabolic envelope peak (coarse) picks the right period for each step.
-  const Pc = SR / MN_FC;
+  const Pc = SR / MN_FC, now = performance.now(), newTracks = [];
+  const wrapP = x => x - Pc * Math.round(x / Pc);
   for (const q of kept) {
     const i = q.i0; if (i == null || i < 10 || i > nb - 11) continue;
     const coarse = [], fine = [];
@@ -412,22 +413,32 @@ function echoMotion(xr, L, d, kept, nb) {
       coarse.push(k0 + (den < 0 ? 0.5 * (y0 - y2) / den : 0));
       fine.push(k0 + MN_SIGN * Math.atan2(c.im[k0], c.re[k0]) / (2 * Math.PI) * Pc);
     }
+    // Which whole carrier turn? Predict the per-click step from (1) this echo's recent track if there is one, else
+    // (2) the least-squares slope of the envelope peaks over ALL clicks in the reading (less noisy than one step);
+    // a track is dropped if the envelope slope disagrees by more than a full turn. Then each phase step is taken as the
+    // prediction plus the wrapped difference (within half a turn of it).
+    let cm = 0; for (const c of coarse) cm += c; cm /= J;
+    let sxx = 0, sxy = 0; for (let j = 0; j < J; j++) { const u = j - (J - 1) / 2; sxx += u * u; sxy += u * (coarse[j] - cm); }
+    const slopeC = sxy / sxx;
+    const tr = MN_TRACKS.find(t => Math.abs(t.r - q.r) < 0.06 && now - t.t < 600);
+    const pred = tr && Math.abs(tr.step - slopeC) < Pc ? tr.step : slopeC;
+    q.vtr = tr && pred === tr.step ? 1 : 0;
     const steps = [], csteps = [];
     for (let j = 1; j < J; j++) {
-      const cst = coarse[j] - coarse[j - 1];
-      let st = fine[j] - fine[j - 1];
-      st += Pc * Math.round((cst - st) / Pc);   // whole carrier periods from the envelope
-      steps.push(st); csteps.push(cst);
+      csteps.push(coarse[j] - coarse[j - 1]);
+      steps.push(pred + wrapP(fine[j] - fine[j - 1] - pred));
     }
     const stat = a => { const mu = a.reduce((x, y) => x + y, 0) / a.length; return [mu, Math.sqrt(a.reduce((x, y) => x + (y - mu) * (y - mu), 0) / a.length)]; };
     const [mean, sd] = stat(steps), [cmean, csd] = stat(csteps);
     const toV = st => -(st * C / (2 * SR)) / dt;        // samples of round-trip delay per click -> m/s, + = closer
     const fq = Math.max(0, 1 - sd / (Pc / 4));          // fine (phase) consistency
     const cq = Math.max(0, 1 - csd / 2);                // coarse (envelope) consistency: spread of 2 samples -> 0
-    if (fq >= 0.5) { q.v = toV(mean); q.vq = fq; q.vsrc = 'p'; }        // phase: ~0.1 mm per click
+    if (fq >= 0.5) { q.v = toV(mean); q.vq = fq; q.vsrc = q.vtr ? 't' : 'p'; newTracks.push({ r: q.r, step: mean, t: now }); }   // phase (t = turn chosen from the track)
     else if (cq >= 0.3) { q.v = toV(cmean); q.vq = 0.5 * cq; q.vsrc = 'e'; }   // envelope only: ~1 mm per click
     else { q.v = null; q.vq = 0; q.vsrc = 'x'; }   // lost track (e.g. > ~30-50 cm/s while clicks are folded): no estimate
   }
+  // keep tracks for echoes seen now, plus recent ones not seen this time (brief dropouts)
+  MN_TRACKS = newTracks.concat(MN_TRACKS.filter(t => now - t.t < 600 && !newTracks.some(n => Math.abs(n.r - t.r) < 0.06)));
   return J;
 }
 let MN_SIGN = 1;   // phase-vs-delay sign convention (set by the self-test in the simulation; 1 = phase grows with delay)
@@ -635,7 +646,7 @@ async function start(keep) {
   }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
-  running = true; lastFrames = -1; staleSince = 0;
+  running = true; lastFrames = -1; staleSince = 0; MN_TRACKS = [];
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
   logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
@@ -650,7 +661,7 @@ function saveLog(partial) {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p/e]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
   } catch (e) { }
   sonarLog = []; sonarEvents = []; logPart = partial ? logPart + 1 : 0;
@@ -661,7 +672,7 @@ function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textCo
 function stopByUser() { logEv('stop', { by: 'user' }); stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
 window.onSonarStopped = why => { if (running) logEv('stop', { by: 'system', why: why || 'app paused / left' }); running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start(false);
-$('clear').onclick = () => { seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
+$('clear').onclick = () => { MN_TRACKS = []; seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
