@@ -218,3 +218,19 @@ Script: analysis/purity_coherence.py.
   integration) loses slow steady moves (+2.5 cm for the 25 cm move). Not pursued.
 - Untestable on existing data (needs a new signal): shorter repeat (128 tones, 21 ms windows: halves the smearing,
   echoes beyond 3.7 m wrap), separate hum band (proven physics: hum reads 82–93 % at any speed in sim), second speaker.
+
+## Offline round, 2026-11-18 evening (no new phone tests)
+- **Pilots' "low wobble" lead:** matched by echo level and turning, 1-s wobble pilots 0.32–0.54 cm vs Quiet tones
+  0.64–0.99 vs Quiet 1.14–1.61 cm. Hypothesis "the sweep-like (Schroeder) tone phases cause speed-dependent distance
+  errors that the pilots' scrambled phases avoid": direct simulation of a wall moving at a steady speed gives the SAME
+  error for both designs (≈ ±1 cm at 10 cm/s, ±3 cm at 20 cm/s — window smearing + the 21 cm/s comb ambiguity). So the
+  lead is most likely session make-up (the pilots sessions include table rests and short runs), not the signal.
+  By-product: tone modes misread a moving echo by ~1 cm per 10 cm/s.
+- **Second-mic diversity against jitter (raw wall recording):** the back mic's wall echo is weak and poorly matched to
+  the bottom mic's (best alignment at the search edge, shape match 0.12/0.52, peak positions correlate +0.10); its
+  jitter 5.2–6.2 cm; combining with the bottom mic worsens it (1 band 3.90 → 5.64 cm, 2 bands 1.83 → 3.33 cm). No.
+- **Per-echo residual vs own speed (smooth-fit test):** slope ≈ 0 in all modes — this test can't see smooth,
+  speed-proportional errors (absorbed by the fit); the direct simulation above is the valid test.
+- Conclusion: the offline-testable levers inside the 16–22 kHz band are largely exhausted; remaining jitter is the
+  overlapping-reflection physics. Levers left need new data: other bands (audible), longer looks per heading, or
+  different use of the data (multi-spot mapping).
