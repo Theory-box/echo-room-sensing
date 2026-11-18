@@ -673,3 +673,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   mode): echoes per reading 2.7–2.9 vs ~1.0 for Quiet, wall echo present in 88–96 % of readings vs 43–68 %,
   distance error median 0.25–0.4 cm (same), walls 12/16 both, worst direction 4.6° vs 9.9°. The sim speaker is ideal;
   not yet tried on the phone. Next if it holds: hum-phase motion → front/back (replacing the accelerometer).
+- **Quiet tones on the phone (2026-11-18 14:03–14:05, same spot; Quiet 4 bands 33 s, Quiet tones 47 s, Quiet tones
+  short hold/push 12 s, Quiet 1 band 40 s).** Map: echoes per second 25.1 / 34.2 / 34.1 (Quiet 4 bands / tones /
+  Quiet 1 band), confirmed per second 17.7 / 23.4 / 22.3, walls/min 27 / 21 / 24, noise re direct −62.5 / −71.0 /
+  −71.7 dB, processing 28 / 15 / 24 ms per reading → tones ≈ plain Quiet at its better setting; not clearly better.
+  Motion from the tones' phase: NOT reproduced so far. Fine 3 cm slots (echoes slide out of their slot as the hand
+  moves), single tones (each 1/256 of the power, ~12 dB weaker than in the 16-tone hum — too faint) and groups of
+  16/32 neighbouring tones all gave scale 0.01–0.16 of the sensor (hum-only: 0.38–0.64) and correlation ≤ 0.6 at
+  the edge of the lag range. The hum worked because 16 tones each carried much more power. Possible fix: a few
+  stronger "pilot" tones inside the comb (as OFDM does for channel tracking), at some cost to the map.
