@@ -697,3 +697,8 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   window started at 8.3 s, so the still part and most of the push (4–12 s) were cut; on what remains (mostly turning)
   correlation ≤ 0.42 with the best lag at the search edge = no real match. Needs a recording whose pushes fall in
   the last 40 s.
+- **Pilots, push-only run (2026-11-18 14:23, 31 s, heading −5…9°, sensor forward movement 3.1 cm rms).** Motion from
+  the 16 pilot tones vs the sensor's forward movement: correlation −0.69 with the tones 261 ms later (hum-only tests:
+  −0.74/−0.81 at 330–390 ms) — the motion signal is back; best single slot −0.77 at 320 ms. Scale 0.18 (best slot
+  0.31) vs 0.38–0.64 for the hum: the size reads small. The same analysis on groups of 16 ordinary tones: +0.33 at a
+  random lag (nothing) → the pilots carry it. Map cost of pilots not visible (14:19 run: more echoes than plain tones).
