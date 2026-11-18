@@ -9,6 +9,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
+import android.media.AudioTimestamp;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -72,6 +73,9 @@ public class MainActivity extends Activity implements SensorEventListener {
     private int accN_ = 0;          // samples written in total
     private int accRead = 0;        // samples already handed to the page
     private volatile boolean rotOK = false;
+    private volatile long yawNs = 0;            // sensor timestamp (elapsedRealtimeNanos clock) of the latest heading
+    // capture clock: recording frame tsFrame was captured at tsNanos (elapsedRealtimeNanos clock), from AudioRecord
+    private long tsFrame = -1, tsNanos = 0;
     private volatile String sessionDir = null;
 
     // ---------- live sonar: looping ping playback + continuous stereo recording into a ring buffer ----------
@@ -151,7 +155,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             recOrNull = rec;
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
             synchronized (ringLock) {
-                ringCap = sr * 20;    // 20 s: the live view reads the last ~0.5 s; the rest is kept for saveSessionRaw
+                ringCap = sr * 20;
+                tsFrame = -1;    // 20 s: the live view reads the last ~0.5 s; the rest is kept for saveSessionRaw
                 ring = new float[ringCap * 2];
                 ringFrames = 0;
             }
@@ -163,6 +168,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             sonarThread = new Thread(() -> {
                 float[] buf = new float[1024 * 2];
                 long lastVol = 0;
+                final AudioTimestamp ats = new AudioTimestamp();
                 try {
                     while (sonarOn && myGen == sonarGen) {
                         long now = System.currentTimeMillis();
@@ -191,6 +197,10 @@ public class MainActivity extends Activity implements SensorEventListener {
                             }
                             ringFrames += frames;
                         }
+                        try {
+                            if (rec.getTimestamp(ats, AudioTimestamp.TIMEBASE_BOOTTIME) == AudioRecord.SUCCESS)
+                                synchronized (ringLock) { if (myGen == sonarGen) { tsFrame = ats.framePosition; tsNanos = ats.nanoTime; } }
+                        } catch (Throwable ignored) { }
                     }
                 } catch (Throwable t) {
                     Log.e(TAG, "sonar record thread failed", t);   // recording stops advancing -> page shows "stalled"
@@ -338,6 +348,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 SensorManager.getRotationMatrixFromVector(rotMat, e.values);
                 SensorManager.getOrientation(rotMat, orient);
                 yawDeg = (float) Math.toDegrees(orient[0]);
+                yawNs = e.timestamp;
                 rotOK = true;
                 break;
             case Sensor.TYPE_LINEAR_ACCELERATION:
@@ -628,9 +639,18 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
             return sb.toString();
         }
+        /** Capture clock: "frame,ageMs" = recording frame number and how long ago (ms) it was captured, or "" if the
+         *  device gives no capture timestamps. Same clock as the sensor timestamps. */
+        @JavascriptInterface public String sonarClock() {
+            synchronized (ringLock) {
+                if (tsFrame < 0) return "";
+                return tsFrame + "," + String.format(Locale.US, "%.2f", (android.os.SystemClock.elapsedRealtimeNanos() - tsNanos) / 1e6);
+            }
+        }
         @JavascriptInterface public String orientation() {
             // non-finite sensor values would make invalid JSON (and break every sonar frame): send 0 instead
-            return "{\"yaw\":" + fin(yawDeg) + ",\"gyro\":" + fin(gyroMag)
+            float ya = yawNs > 0 ? (android.os.SystemClock.elapsedRealtimeNanos() - yawNs) / 1e6f : 0f;
+            return "{\"yaw\":" + fin(yawDeg) + ",\"ya\":" + fin(ya) + ",\"gyro\":" + fin(gyroMag)
                     + ",\"g\":[" + fin(gravity[0]) + "," + fin(gravity[1]) + "," + fin(gravity[2]) + "]}";
         }
 

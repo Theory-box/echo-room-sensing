@@ -581,3 +581,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   13–18 % (median +5…+7 dB); 1 band 25–26 % vs 18 %. Reason: walls are 10–15 cm humps, so the local reference
   window measures the wall's own hump. Not built. Also: at median +7 dB, 2 bands give 2.04 persistent / 13 %
   non-persistent per reading vs 1.85 / 18 % with 1 band.
+- **Build "sensor timing" (2026-11-18).** (1) Click capture time from AudioRecord.getTimestamp(TIMEBASE_BOOTTIME)
+  (frame number ↔ capture time, same clock as sensor events) via `Native.sonarClock()`; falls back to the old
+  "buffer end + 40 ms" estimate if unavailable or > 400 ms off; logged `tc` (page-clock capture time) + `cs` (c/g).
+  (2) Heading samples stamped with the rotation-vector event time (`ya` = age) instead of the poll time.
+  (3) Leaky-integrator crossover 0.7 → 1.2 s (0.6 Hz: gain ~0.92 → ~0.97, lead ~100 → ~60 ms). (4) Raw horizontal
+  acceleration logged per reading (`ac`), so gain/delay can be fitted offline against echo-derived motion.
+  Sims unchanged (walls 43/48 at 2 bands; motion cases 0 wrong). Installed; not yet tested on the phone.
