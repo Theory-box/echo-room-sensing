@@ -636,3 +636,13 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   motion; with surfaces ahead + behind of similar strength, a per-distance profile (inverse FFT across tones, 4.3 cm
   steps, repeats every 0.69 m) tracks each separately with the right sign (behind 0.09 mm, ahead 5 mm, side 8 mm).
   Not yet tried on real audio (speckle could spoil it as it did for clicks).
+- **First real hum recording (2026-11-18 13:34, 33 s: facing a wall ~1 m, ~5 s still, ~20 s of natural movement,
+  slow part-turn −18…+96°).** All 16 tones present, 71–83 dB over the background. The changing part of the sound is
+  dominated by the phone's own direct sound (hand/grip shifting), ~34 dB below the static part. Away from the
+  direct-sound slot (±6 of 64 slots), each slot's unwrapped hum phase follows the motion sensor's forward movement:
+  correlation −0.6…−0.82 (strongest ~1.07 m mod 0.686 m ≈ the wall), path rms ~2 cm vs sensor 2.0 cm; negative sign =
+  surfaces ahead (paths shorten moving forward). Median over slots: correlation −0.81, scale 0.64× the sensor, hum
+  328 ms later than the acceleration (consistent with the ~0.12–0.3 s offset found earlier). While still: hum wobble
+  0.4–1.2 mm sd (range 2.7–4.8 mm) vs the sensor's 2.3–11 mm → the hum is the steadier motion measure at rest.
+  Individual slots slip (disagree ~4 cm from the median); the median is robust. One recording; the sensor is not a
+  precise truth. Script: analysis/hum_real_test.py.
