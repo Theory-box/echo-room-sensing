@@ -654,3 +654,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   Sim: map 39/48 walls, 4 false (plain Quiet 39/5), directions slightly rougher at 8/s; hum track with clicks on 1.3 mm
   rms over 9 cm (corr 0.998). Costs: click band 3.5 vs 6 kHz (~5 vs ~3 cm detail) and shared speaker power; the real
   speaker is weaker at 18.5–22 kHz than the sim assumes. Installed; not yet tried on the phone.
+- **Hybrid on the phone (2026-11-18 13:46–13:48; Quiet + hum 59 s, plain Quiet 49 s, hum only 36 s; all 15/s, High,
+  4 pitch bands, same room).** Map: echoes per reading 0.82 (hybrid) vs 1.85 (Quiet), confirmed 57 vs 75 %, walls/min
+  7 vs 20, noise re the click −58.9 vs −62.4 dB → the hybrid roughly halves detections (quieter clicks, weaker speaker
+  at 18.5–22 kHz, hum raising the floor). Hum: hum-only reproduced (second recording: correlation with the sensor's
+  forward movement −0.74, hum 392 ms later; first: −0.81, 328 ms) → not a fluke. In the hybrid the hum fails (+0.22):
+  its tones flicker at the click rate (15 Hz component 10.5 dB above the movement band, vs −12 dB in hum-only) even
+  after band filtering → the clicks modulate the hum in the phone itself (speaker protection / limiter pumping, or
+  intermodulation). Removing a common per-block gain or the per-click repeating pattern offline didn't fix it. That
+  session also had less forward movement (1.1 cm rms vs 2–2.6). Hybrid as built: worse on both counts.
