@@ -248,3 +248,22 @@ Script: analysis/purity_coherence.py.
 - Conclusion: the extra mics give direction (ahead/side/behind) only at audible low pitches — where the app's Full
   sweep already times from its 2–8 kHz part (live lags looked random; a shape-match filter like the one here would
   help). They don't improve distances, and they can't help the quiet modes.
+
+## Theory check: limits, and two "right algorithm" ideas tested (2026-11-18)
+- **Limits.** Distance: noise limit < 1 mm (6 kHz, ~25 dB); real limit = overlapping reflections, ~3 cm / sqrt(looks)
+  → ~1 cm per second of turning; the wall finder is near that → at most ~2x left. Direction: the phone's ~1 cm aperture
+  gives ±20°; the ~50 cm circle the phone sweeps while turning would give ~2° if combined coherently (synthetic
+  aperture) — the one place a ~10–30x gain exists in principle.
+- **Synthetic aperture (sim, 24 s turn, walls + 2 small objects, tone pipeline):** object width (−6 dB) without phase
+  (like today) 42–52°; coherent with the TRUE path 1.3–1.6° (~30x sharper); with 1 cm of unknown hand wobble 44°;
+  simple autofocus (one phase per reading) 46–63°; 2-D autofocus (per-reading shift search on the brightest pixels,
+  4 rounds) estimates the shift with ~28 mm error (worse than the wobble) → 32–66°. The 1.8 cm wavelength gives many
+  near-equal wrong solutions; bootstrapping from a blurred image doesn't converge. Needs the phone path to ~2 mm from
+  an independent source — which none of our motion signals provide. Not tried on real data (sim shows it can't work so).
+- **Room fit (box: 4 perpendicular walls; per rotation each wall's distance by voting; sim: exact for a box, a missing
+  wall gets clutter-level votes = flagged, L-shaped: nearer part):** on 11 same-spot sweeps from today, 8 give a
+  consistent room — walls about 1.1 / 1.3 / 1.35–1.55 / 1.8 m from the turning spot (opposite pairs → ~2.65–2.77 m by
+  ~2.87–2.99 m); 3 sessions put the 4th wall at 4.58–4.63 m (consistent → maybe a real opening/far wall); 1 failed
+  (pilots sweep: 4.47 m everywhere) and 1 was off. Box orientation can't be compared across sessions (the game rotation
+  vector's heading reference changes per session). Promising as a checker/room outline with per-wall support; needs a
+  truth check of the room size.
