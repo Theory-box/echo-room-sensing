@@ -65,6 +65,13 @@ public class MainActivity extends Activity implements SensorEventListener {
     private volatile float yawDeg = 0f;
     private volatile float gyroMag = 0f;
     private final float[] gravity = new float[3];
+    // phone acceleration (gravity removed) turned into the room's horizontal frame (east, north) with the same rotation
+    // as the heading; ring of {timestamp ns, east, north} for the page's short-range motion estimate
+    private final long[] accT = new long[1024];
+    private final float[] accE = new float[1024], accN = new float[1024];
+    private int accN_ = 0;          // samples written in total
+    private int accRead = 0;        // samples already handed to the page
+    private volatile boolean rotOK = false;
     private volatile String sessionDir = null;
 
     // ---------- live sonar: looping ping playback + continuous stereo recording into a ring buffer ----------
@@ -301,7 +308,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onResume() {
         super.onResume();
         paused = false;
-        int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY};
+        int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY, Sensor.TYPE_LINEAR_ACCELERATION};
         for (int t : types) {
             Sensor s = sm.getDefaultSensor(t);
             if (s != null) sm.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME);
@@ -331,6 +338,18 @@ public class MainActivity extends Activity implements SensorEventListener {
                 SensorManager.getRotationMatrixFromVector(rotMat, e.values);
                 SensorManager.getOrientation(rotMat, orient);
                 yawDeg = (float) Math.toDegrees(orient[0]);
+                rotOK = true;
+                break;
+            case Sensor.TYPE_LINEAR_ACCELERATION:
+                if (!rotOK) break;
+                synchronized (accT) {
+                    int k = accN_ % accT.length;
+                    float x = e.values[0], y = e.values[1], z = e.values[2];
+                    accT[k] = e.timestamp;
+                    accE[k] = rotMat[0] * x + rotMat[1] * y + rotMat[2] * z;
+                    accN[k] = rotMat[3] * x + rotMat[4] * y + rotMat[5] * z;
+                    accN_++;
+                }
                 break;
             case Sensor.TYPE_GYROSCOPE:
                 gyroMag = (float) Math.sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]);
@@ -594,6 +613,21 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         /** Yaw (deg, game rotation vector, no magnetometer), gyro magnitude (rad/s), gravity (m/s^2). */
+        /** Acceleration samples not yet handed out: "age0,east0,north0;age1,..." with age = ms before now (oldest first). */
+        @JavascriptInterface public String motion() {
+            long now = android.os.SystemClock.elapsedRealtimeNanos();
+            StringBuilder sb = new StringBuilder();
+            synchronized (accT) {
+                if (accN_ - accRead > accT.length) accRead = accN_ - accT.length;
+                for (int i = accRead; i < accN_; i++) {
+                    int k = i % accT.length;
+                    if (sb.length() > 0) sb.append(';');
+                    sb.append(String.format(Locale.US, "%.1f,%.4f,%.4f", (now - accT[k]) / 1e6, fin(accE[k]), fin(accN[k])));
+                }
+                accRead = accN_;
+            }
+            return sb.toString();
+        }
         @JavascriptInterface public String orientation() {
             // non-finite sensor values would make invalid JSON (and break every sonar frame): send 0 instead
             return "{\"yaw\":" + fin(yawDeg) + ",\"gyro\":" + fin(gyroMag)

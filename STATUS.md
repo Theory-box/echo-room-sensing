@@ -522,3 +522,15 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   every frame logs `fr` (recording sample counter); on Stop the last 20 s of both mics are saved as raw_audio.wav
   (float32 stereo) next to the log (ring buffer 2 s → 20 s). Sim (all pings × rates): echo distance error median
   0.1–0.8 cm, 90 % ≤ 1.7 cm; walls unchanged (47/48, median 2.6°). Not yet tested on the phone.
+- **Build "motion direction" (2026-11-18): front/back from short-range phone motion — logged only, not drawn.**
+  Prior art: Swadloon (2013) — phone shaking/walking + Doppler + accelerometer/gyro → direction (~2° to a source).
+  Native: TYPE_LINEAR_ACCELERATION rotated into the room frame with the game-rotation-vector matrix, buffered with
+  timestamps (`Native.motion()`). Page: phone velocity = leaky-integrated acceleration (fast part, τ 0.7 s, 3 s offset
+  removal) + turning-on-the-spot model ARM·dψ/dt (slow part), complementary. Per tracked echo, least squares over
+  1.5 s of (phase-measured approach speed, phone velocity over the same clicks): rho = v·u → u's forward/right parts and
+  z-scores (|z| > 2.5 = sure). Forward = heading + 180 (bottom edge). Logged as e[13] + frame pv/na.
+  Sim (true velocity + 2 cm/s noise + 1 cm/s bias; wall ahead 1.5 m, wall behind 2.2 m): a 1–2 cm forward/back push
+  at 1–1.5 Hz → 100 % of echoes ahead/behind called correctly (Quiet 15/s, Strong 15/s; Quiet 8/s 63 % called, rest
+  unsure); sideways push, no motion, or turning only → no wrong calls (unsure). Not tested: the real acceleration-based
+  velocity (sensor latency/scale), timing alignment, moving people. Sim note: a near-noiseless sim puts Quiet's Auto
+  threshold too high (needs real room clutter) — the motion sim uses High sensitivity.
