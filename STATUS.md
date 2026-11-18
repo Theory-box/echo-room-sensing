@@ -827,3 +827,16 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   median vs 3-20). Note: the Kalman tracker's same-spot steadiness is partly from using few echoes (0 accepted on
   140553). The 4-wall box is too coarse a model -- furniture echoes consistently from where the box has nothing. Next
   idea: match each reading against the whole accumulated echo map (scan matching), so furniture becomes a landmark.
+- **Echo odometry (all echoes vote on each step): no help** -- creeps ~1 cm/s forward while only turning; added nothing
+  to box tracking on sim walks. Sims with a fixed floor echo break the box tracker (offline copy has no ring filter).
+- **Mirror (image-source) check on 11 sweeps:** corner echoes not present (6% vs 7% chance; Wide mode 21% vs 4%, one
+  session); two-bounce echoes real but rare: room width 7% vs 2.5% chance, 2x wall 5.5% vs 2.6%. A width vote finds the
+  true width in 1/24 axes -- too weak to build walls from. Recurring far surfaces ~4.6 m / ~4.0 m in most sessions.
+- **Box "nearest strong surface = wall, farther = outside line" + ghost guard: a wash** (rooms > 3.5 m long 13 -> 11 of
+  32; fixes 2 of 4 "5.9 m" rooms, shrinks others to furniture ~30 cm in front of a wall). Not built.
+- **Push ghost removal (2026-11-18, always on in Map view):** facing one way, push the phone in/out; echoes followed
+  reading to reading and compared with the surface in front. Offline, 14 push stretches: 15 echoes moved with the wall,
+  7 stayed put (several of the 4.3-4.7 m "far walls"), none at twice the rate. In the app: stays put -> ghost (that
+  distance +-4 cm, direction +-20 deg) kept off map / room box / tracking and wiped; moves -> real (clears a ghost).
+  Sim: ghost found, real surface kept, no ghosts without pushing. Replay on real logs: mostly far echoes flagged, but
+  also a few near ones (0.57-0.93 m, 1.58 m) -- unverified. Logs: pg (verdicts), ng (ghosts so far).
