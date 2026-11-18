@@ -422,3 +422,21 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   active. Simulation: still body echo 0.34 m removed in Quiet/Full/Strong; moving hand ~0.45 m detected 28/31 (was 14/31)
   Quiet, 16/16 (was 8/16) Strong, 31/31 (was 13/31) Full; still wall 2 m and moving wall unaffected. Expected side effect:
   after a grip change, ~1–2 s of near-zone junk while it relearns.
+- **Audit round (2026-11-17, mine + independent agent with its own simulation harness) — fixed:**
+  1. each click was processed/learned ~3× (overlapping readings) → per-click results cached by absolute sample number:
+     compressed once, taught to the near-zone background once (also ~3× less FFT work);
+  2. time zero re-picked every reading could flip by one sample (direct sound near half a sample) → misaligned near-zone
+     background → false near echoes (Full sweep: 29/30 frames) → time zero locked to the sample-locked click loop
+     (median of first readings, re-learn only if off > 2 samples for 10 readings), background reset when it changes;
+  3. speed "fully reliable" with only 2 clicks (4/s, fast turns) → one step = unverified (below the 0.5 bar);
+  4. echo leaving the ±8-sample click-to-click search, or > 6 samples/click → 'lost' instead of confident-wrong speeds
+     (search centre now follows the track's expected shift);
+  5. near-zone speeds now use the background-removed response;
+  6. heading timestamp used the wrong click centre (off by half a click);
+  7. log: setting change now recorded before the restart it causes; a failed save keeps the data and says so;
+  8. Java: non-finite sensor values sent as 0 (invalid JSON would break every frame).
+  Harness results after fixes: no false near echoes at integer/half-sample offsets in Strong/Full/Quiet; walls intact;
+  speeds correct where trackable; confident-wrong speeds: 4/s Full sweep 24 → 0, Strong 4/s 20 → 0, walking (1 m/s, Full
+  sweep 15/s) 12 → 5 of 36 (mostly 'lost'; walking needs another method). Not changed: at 2 clicks/s there is one click per
+  reading (no speeds); restarts don't start a new segment (split analysis on 'restart' events).
+- Later: compare against open-source projects (LLAP Android code; pyroomacoustics for simulated rooms).

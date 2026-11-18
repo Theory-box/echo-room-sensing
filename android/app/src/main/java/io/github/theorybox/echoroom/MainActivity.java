@@ -384,6 +384,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     // ---------- helpers ----------
+    private static float fin(float v) { return Float.isNaN(v) || Float.isInfinite(v) ? 0f : v; }
     private static Object num(float v) {
         return (Float.isNaN(v) || Float.isInfinite(v) || v <= -3e38f) ? JSONObject.NULL : (Object) (double) v;
     }
@@ -594,8 +595,9 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         /** Yaw (deg, game rotation vector, no magnetometer), gyro magnitude (rad/s), gravity (m/s^2). */
         @JavascriptInterface public String orientation() {
-            return "{\"yaw\":" + yawDeg + ",\"gyro\":" + gyroMag
-                    + ",\"g\":[" + gravity[0] + "," + gravity[1] + "," + gravity[2] + "]}";
+            // non-finite sensor values would make invalid JSON (and break every sonar frame): send 0 instead
+            return "{\"yaw\":" + fin(yawDeg) + ",\"gyro\":" + fin(gyroMag)
+                    + ",\"g\":[" + fin(gravity[0]) + "," + fin(gravity[1]) + "," + fin(gravity[2]) + "]}";
         }
 
         @JavascriptInterface public boolean say(String text) {

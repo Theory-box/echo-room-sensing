@@ -414,9 +414,12 @@ let BG = null;   // { n, len, r1, i1, r2, i2 }: background per mic (bottom, back
 function resetBG() { BG = null; }
 // a, b: complex outputs of one click on mic 1 / mic 2 (index 0 = direct sound). Writes the background-removed envelopes
 // for i < nearLen into o1 / o2 (blended back to the plain envelope across the fade), and updates the background.
-function removeStatic(a, b, nearLen, fadeStart, o1, o2) {
+function removeStatic(a, b, nearLen, fadeStart, o1, o2, c1) {
   const gr = a.re[0], gi = a.im[0], g2 = gr * gr + gi * gi;
-  if (g2 < 1e-30) return false;
+  if (g2 < 1e-30) {   // silent click: plain envelopes
+    for (let i = 0; i < nearLen; i++) { o1[i] = Math.hypot(a.re[i], a.im[i]); o2[i] = Math.hypot(b.re[i], b.im[i]); }
+    return false;
+  }
   const gm = Math.sqrt(g2);
   if (!BG || BG.len !== nearLen) BG = { n: 0, len: nearLen, r1: new Float64Array(nearLen), i1: new Float64Array(nearLen), r2: new Float64Array(nearLen), i2: new Float64Array(nearLen) };
   const al = Math.max(0.04, 1 / (BG.n + 1));    // plain mean while learning, then ~25-click memory (~1.7 s at 15/s)
@@ -430,6 +433,10 @@ function removeStatic(a, b, nearLen, fadeStart, o1, o2) {
       const res1 = Math.hypot(u1r - BG.r1[i], u1i - BG.i1[i]) * gm, res2 = Math.hypot(u2r - BG.r2[i], u2i - BG.i2[i]) * gm;
       o1[i] = w * res1 + (1 - w) * Math.hypot(a.re[i], a.im[i]);
       o2[i] = w * res2 + (1 - w) * Math.hypot(b.re[i], b.im[i]);
+      if (c1) {   // residual back in the click's own units (times the direct sound), blended like the envelope
+        const dr = u1r - BG.r1[i], di = u1i - BG.i1[i], rr = dr * gr - di * gi, ri = dr * gi + di * gr;
+        c1.re[i] = w * rr + (1 - w) * a.re[i]; c1.im[i] = w * ri + (1 - w) * a.im[i];
+      }
     } else { o1[i] = Math.hypot(a.re[i], a.im[i]); o2[i] = Math.hypot(b.re[i], b.im[i]); }
     BG.r1[i] += al * (u1r - BG.r1[i]); BG.i1[i] += al * (u1i - BG.i1[i]);
     BG.r2[i] += al * (u2r - BG.r2[i]); BG.i2[i] += al * (u2i - BG.i2[i]);
@@ -437,6 +444,33 @@ function removeStatic(a, b, nearLen, fadeStart, o1, o2) {
   BG.n++;
   return ready;
 }
+
+// ---------- time zero locked to the click loop ----------
+// Playback and recording share one clock, so the direct sound sits at a fixed position modulo PERIOD in absolute
+// recorded-sample time. Re-picking it every reading (argmax) can flip by one sample when the true peak is near half a
+// sample, which misaligns the near-zone background. So: learn it over the first readings (median), then hold it;
+// re-learn only if it is clearly off (> 2 samples) for 10 readings in a row.
+let D_LOCK = null;
+function lockD(dRaw, totalFrames, L) {
+  const base = totalFrames - L, abs = ((base + dRaw) % PERIOD + PERIOD) % PERIOD;
+  const cd = (a, b) => { let x = a - b; x -= PERIOD * Math.round(x / PERIOD); return x; };
+  if (!D_LOCK) D_LOCK = { abs, hist: [abs], off: 0 };
+  else if (Math.abs(cd(abs, D_LOCK.abs)) <= 2) {
+    D_LOCK.off = 0;
+    if (D_LOCK.hist.length < 15) {
+      D_LOCK.hist.push(abs);
+      const ref = D_LOCK.hist[0], rel = D_LOCK.hist.map(v => cd(v, ref)).sort((a, b) => a - b);
+      D_LOCK.abs = ((ref + rel[rel.length >> 1]) % PERIOD + PERIOD) % PERIOD;
+    }
+  } else if (++D_LOCK.off > 10) D_LOCK = { abs, hist: [abs], off: 0 };
+  // time zero moved (still settling, or re-learned): anything learned at the old alignment is wrong -> start over
+  if (D_LOCK.last !== undefined && D_LOCK.last !== D_LOCK.abs) { resetBG(); CLK = new Map(); }
+  D_LOCK.last = D_LOCK.abs;
+  return ((D_LOCK.abs - base) % PERIOD + PERIOD) % PERIOD;
+}
+// per-click results cached by absolute start sample: consecutive readings overlap by all but one click, so each click
+// is compressed once and taught to the near-zone background once
+let CLK = new Map();
 
 function echoMotion(cs, kept, nb) {     // cs = per-click complex outputs (mic 1, MN_TPL) of the clicks in this reading
   const J = cs ? cs.length : 0;
@@ -450,12 +484,16 @@ function echoMotion(cs, kept, nb) {     // cs = per-click complex outputs (mic 1
   for (const q of kept) {
     const i = q.i0; if (i == null || i < 10 || i > nb - 11) continue;
     const coarse = [], fine = [];
-    let prev = null;
+    const tr = MN_TRACKS.find(t => Math.abs(t.r - q.r) < 0.06 && now - t.t < 600);
+    const stepGuess = tr ? Math.round(tr.step) : 0;    // expected peak shift per click (samples), from the track
+    let prev = null, lost = false;
     for (const c of cs) {
       const m = k => (k < 0 || k >= nb) ? 0 : Math.hypot(c.re[k], c.im[k]);
-      // first click: wide search around the folded echo position; later clicks: follow the previous click's peak
-      const c0 = prev === null ? i : prev, w = prev === null ? 4 * J + 4 : 8;
+      // first click: wide search around the averaged echo position; later clicks: previous peak + expected shift.
+      // A peak on the edge of the search window means the echo moved further than we can follow: give up (lost).
+      const c0 = prev === null ? i : prev + stepGuess, w = prev === null ? 4 * J + 4 : 8;
       let k0 = c0; for (let k = c0 - w; k <= c0 + w; k++) if (m(k) > m(k0)) k0 = k;
+      if (prev !== null && Math.abs(k0 - c0) >= w) lost = true;
       prev = k0;
       const y0 = m(k0 - 1), y1 = m(k0), y2 = m(k0 + 1), den = y0 - 2 * y1 + y2;
       coarse.push(k0 + (den < 0 ? 0.5 * (y0 - y2) / den : 0));
@@ -468,7 +506,6 @@ function echoMotion(cs, kept, nb) {     // cs = per-click complex outputs (mic 1
     let cm = 0; for (const c of coarse) cm += c; cm /= J;
     let sxx = 0, sxy = 0; for (let j = 0; j < J; j++) { const u = j - (J - 1) / 2; sxx += u * u; sxy += u * (coarse[j] - cm); }
     const slopeC = sxy / sxx;
-    const tr = MN_TRACKS.find(t => Math.abs(t.r - q.r) < 0.06 && now - t.t < 600);
     const pred = tr && Math.abs(tr.step - slopeC) < Pc ? tr.step : slopeC;
     q.vtr = tr && pred === tr.step ? 1 : 0;
     const steps = [], csteps = [];
@@ -479,9 +516,13 @@ function echoMotion(cs, kept, nb) {     // cs = per-click complex outputs (mic 1
     const stat = a => { const mu = a.reduce((x, y) => x + y, 0) / a.length; return [mu, Math.sqrt(a.reduce((x, y) => x + (y - mu) * (y - mu), 0) / a.length)]; };
     const [mean, sd] = stat(steps), [cmean, csd] = stat(csteps);
     const toV = st => -(st * C / (2 * SR)) / dt;        // samples of round-trip delay per click -> m/s, + = closer
-    const fq = Math.max(0, 1 - sd / (Pc / 4));          // fine (phase) consistency
-    const cq = Math.max(0, 1 - csd / 2);                // coarse (envelope) consistency: spread of 2 samples -> 0
-    if (fq >= 0.5) { q.v = toV(mean); q.vq = fq; q.vsrc = q.vtr ? 't' : 'p'; newTracks.push({ r: q.r, step: mean, t: now }); }   // phase (t = turn chosen from the track)
+    // consistency needs >= 2 steps; with only one (2 clicks: 4 clicks/s, or fast turning) it can't be checked -> 0.5
+    const fq = steps.length >= 2 ? Math.max(0, 1 - sd / (Pc / 4)) : 0.45;   // one step: unverified -> below the 0.5 bar
+    const cq = csteps.length >= 2 ? Math.max(0, 1 - csd / 2) : 0.5;
+    // faster than we can follow click to click (> ~6 samples of round-trip delay per click; e.g. walking): no estimate
+    if (Math.abs(fq >= 0.5 ? mean : cmean) > 6) lost = true;
+    if (lost) { q.v = null; q.vq = 0; q.vsrc = 'x'; }
+    else if (fq >= 0.5) { q.v = toV(mean); q.vq = fq; q.vsrc = q.vtr ? 't' : 'p'; newTracks.push({ r: q.r, step: mean, t: now }); }   // phase (t = turn chosen from the track)
     else if (cq >= 0.3) { q.v = toV(cmean); q.vq = 0.5 * cq; q.vsrc = 'e'; }   // envelope only: ~1 mm per click
     else { q.v = null; q.vq = 0; q.vsrc = 'x'; }   // lost track (e.g. > ~30-50 cm/s while clicks are folded): no estimate
   }
@@ -583,6 +624,7 @@ function frame(binM, binS, t0) {
       if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
       else {
         ({ raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value));
+        d = lockD(d, frames, L);
         env2 = envOf(x2); raw2 = env2.subarray(d, d + raw.length);
         // back-mic noise level, to tell whether the back mic actually heard an echo
         const tail2 = env2.subarray(d + nb, d + PERIOD - T);
@@ -592,28 +634,39 @@ function frame(binM, binS, t0) {
       // clicks first (the fold) cancels echoes that move a fraction of a wavelength between clicks (Quiet: ~0.9 cm), so
       // while moving only echoes at 0 / 13.5 / 27 cm/s... survived (2026-11-17 logs). The fold is still used to find the
       // direct sound (time zero) and for the mic self-check: it doesn't move relative to the phone.
-      let mnCs = null, bgReady = false;
+      let mnCs = null, bgReady = false, clickJ = avg;
       if (!UD) {
         const len = PERIOD - T, J = Math.floor((L - d - PERIOD) / PERIOD) + 1;   // clicks whose full period is recorded
+        clickJ = J;
         if (J >= 1) {
           const e1 = new Float64Array(len), e2 = new Float64Array(len), c1s = [];
           let pk = 0;
+          const nearLen = Math.min(len, Math.round(2 * (NEAR_M + NEAR_FADE) / C * SR)), fadeStart = Math.round(2 * NEAR_M / C * SR);
+          const key0 = frames - L;                      // absolute sample number of xr[0]
+          for (const kk of [...CLK.keys()]) if (kk < key0 - PERIOD) CLK.delete(kk);
           for (let j = 0; j < J; j++) {
-            const st = d + j * PERIOD, a = clickC(xr, st, len, PING, 0), b = clickC(xr, st, len, PING, 1);
-            // near zone: static (phone/hand/direct) part removed; beyond it the plain envelope
-            const nearLen = Math.min(len, Math.round(2 * (NEAR_M + NEAR_FADE) / C * SR)), fadeStart = Math.round(2 * NEAR_M / C * SR);
-            const o1 = new Float64Array(nearLen), o2 = new Float64Array(nearLen);
-            bgReady = removeStatic(a, b, nearLen, fadeStart, o1, o2);
-            for (let i = 0; i < len; i++) {
-              e1[i] += (i < nearLen ? o1[i] : Math.hypot(a.re[i], a.im[i])) / J;
-              e2[i] += (i < nearLen ? o2[i] : Math.hypot(b.re[i], b.im[i])) / J;
+            const st = d + j * PERIOD, key = key0 + st;
+            let ck = CLK.get(key);
+            if (!ck || ck.len !== len || ck.tpl !== PING) {
+              // new click: compress both mics once; near zone: static (phone/hand/direct) part removed and the
+              // background taught with this click once
+              const a = clickC(xr, st, len, PING, 0), b = clickC(xr, st, len, PING, 1);
+              const o1 = new Float64Array(nearLen), o2 = new Float64Array(nearLen);
+              const an = { re: Float64Array.from(a.re), im: Float64Array.from(a.im) };
+              const rdy = removeStatic(a, b, nearLen, fadeStart, o1, o2, an);
+              const m1 = new Float64Array(len), m2 = new Float64Array(len);
+              for (let i = 0; i < len; i++) { m1[i] = i < nearLen ? o1[i] : Math.hypot(a.re[i], a.im[i]); m2[i] = i < nearLen ? o2[i] : Math.hypot(b.re[i], b.im[i]); }
+              ck = { len, tpl: PING, m1, m2, an, g: Math.hypot(a.re[0], a.im[0]), rdy };
+              if (PING_LOW) { ck.la = clickC(xr, st, nb, PING_LOW, 0); ck.lb = clickC(xr, st, nb, PING_LOW, 1); }
+              CLK.set(key, ck);
             }
-            pk += Math.hypot(a.re[0], a.im[0]) / J; c1s.push(a);
-            if (PING_LOW) {
-              const la = clickC(xr, st, nb, PING_LOW, 0), lb = clickC(xr, st, nb, PING_LOW, 1);
+            bgReady = ck.rdy;
+            for (let i = 0; i < len; i++) { e1[i] += ck.m1[i] / J; e2[i] += ck.m2[i] / J; }
+            pk += ck.g / J; c1s.push(ck.an);
+            if (PING_LOW && ck.la) {
               if (!tA) { tA = new Float64Array(nb); tB = new Float64Array(nb); }
-              for (let i = 0; i < nb; i++) { tA[i] += Math.hypot(la.re[i], la.im[i]); tB[i] += Math.hypot(lb.re[i], lb.im[i]); }
-              if (MN_TPL === PING_LOW) (mnCs = mnCs || []).push(la);
+              for (let i = 0; i < nb; i++) { tA[i] += Math.hypot(ck.la.re[i], ck.la.im[i]); tB[i] += Math.hypot(ck.lb.re[i], ck.lb.im[i]); }
+              if (MN_TPL === PING_LOW) (mnCs = mnCs || []).push(ck.la);
             }
           }
           raw = e1.subarray(0, nb); raw2 = e2.subarray(0, nb); peak = Math.max(pk, e1[0]) + 1e-12;
@@ -631,7 +684,8 @@ function frame(binM, binS, t0) {
       const o = JSON.parse(Native.orientation());
       // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
       // plus half the sweep length (centre of the sweep), counted back from the buffer end
-      const clickIdx = UD ? d % PERIOD + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + avg * PERIOD / 2 + T / 2;
+      // non-UD: the clicks used are j = 0..clickJ-1 at d + j*P -> their centre, plus half the sweep
+      const clickIdx = UD ? d % PERIOD + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + (clickJ - 1) * PERIOD / 2 + T / 2;
       const ageMs = (L - clickIdx) / SR * 1000 + 40;             // + ~40 ms recording latency
       const yh = yawAt(t0 - ageMs), yawUse = yh === null ? o.yaw : yh;
       if (yaw0 === null) yaw0 = yawUse;
@@ -729,7 +783,7 @@ async function start(keep) {
   }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
-  running = true; lastFrames = -1; staleSince = 0; MN_TRACKS = []; resetBG();
+  running = true; lastFrames = -1; staleSince = 0; MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map();
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
   logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
@@ -739,14 +793,21 @@ async function start(keep) {
 }
 function saveLog(partial) {
   if (!sonarLog.length && !sonarEvents.length) return;
+  let ok = false;
   try {
     Native.newSession();
-    Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
+    const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
       format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
+    ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
+  if (!ok) {   // keep the data (it will be retried at the next save); trim only if it grows very large
+    $('status').textContent = 'Could not save the sonar log (will retry).';
+    if (sonarLog.length > 20000) sonarLog.splice(0, sonarLog.length - 20000);
+    return;
+  }
   sonarLog = []; sonarEvents = []; logPart = partial ? logPart + 1 : 0;
 }
 function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
@@ -755,7 +816,7 @@ function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textCo
 function stopByUser() { logEv('stop', { by: 'user' }); stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
 window.onSonarStopped = why => { if (running) logEv('stop', { by: 'system', why: why || 'app paused / left' }); running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start(false);
-$('clear').onclick = () => { MN_TRACKS = []; resetBG(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
+$('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
@@ -806,7 +867,8 @@ buildView(savedSt.dirf);
 $('volv').textContent = $('vol').value + '%';
 function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings2', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
-for (const k of SAVED) $(k).addEventListener('change', () => logEv('setting', { name: k, value: $(k).value }));
+// capture phase: runs before the element's own onchange handler, so the setting is logged before the restart it causes
+for (const k of SAVED) $(k).addEventListener('change', () => logEv('setting', { name: k, value: $(k).value }), true);
 
 placeButtons();
 showViewHelp();
