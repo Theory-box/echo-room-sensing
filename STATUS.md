@@ -563,3 +563,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     leftover jitter after removing the push sinusoid 3.9 cm (app: full band, 3 clicks) → 1.8–2.0 cm (K=2) →
     1.55 cm (K=4, hump centre, 3 clicks). Cost: coarser resolution (K=4 → ~11 cm). Scripts: analysis/raw_wall_test.py,
     analysis/raw_compounding.py. One recording, one wall — needs confirming.
+- **Build "pitch bands" (2026-11-18): frequency compounding, setting "Pitch bands" 1 / 2 (default) / 4.** Each band =
+  a time piece of the sweep (own Hann taper, zero elsewhere, so delays line up); bottom-mic envelopes beyond the near
+  zone = power sum over bands, scaled to the full band at the direct sound. Near zone (static removal), back mic,
+  speed/phase and two-mic timing stay full band. Raw wall recording: jitter 3.9 → ~1.8 cm (2 bands); wall stands out
+  18.1 / 19.0 / 14.3 dB above the profile median with 1 / 2 / 4 bands; bumps over median+7 dB per reading 7 / 3 / 2.
+  Sim (clean single reflectors, no speckle → only the cost shows): fewer threshold crossings in Quiet (−25…30 %), walls
+  47 / 43 / 42 of 48, distance error still ≤ 1 cm median. Installed; not yet tested on the phone.

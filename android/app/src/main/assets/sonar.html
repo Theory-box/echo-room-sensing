@@ -51,6 +51,7 @@
   </div>
   <div class="row">
     <label>Sensitivity <select id="sens"></select></label>
+    <label>Pitch bands <select id="bands"><option value="1">1 (sharpest)</option><option value="2" selected>2 (steadier)</option><option value="4">4 (steadiest)</option></select></label>
     <label>Hide closer than <select id="mask"><option value="0.15">0.15 m</option><option value="0.3">0.3 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label>
   </div>
   <p class="mut" id="howfwd">Hold the phone <b>flat at chest height</b>, <b>bottom edge (speaker and main mic) pointing away from you</b>, arm a little out. Turn slowly on the spot.
@@ -92,6 +93,25 @@ const PINGS = {
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
 let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
+// Pitch bands ("frequency compounding", standard in medical ultrasound): a wall returns several overlapping reflections
+// a few cm apart; at short wavelengths the slightest movement re-mixes them, so the loudest point hops ~3 cm from click
+// to click (measured 2026-11-18, Quiet). Each pitch band re-mixes them differently, so the envelope is computed per
+// band (each band = one time piece of the sweep, its own taper) and the band envelopes are combined in power. Steadier
+// distances (raw recording: jitter 3.9 -> ~1.8 cm with 2 bands), at the cost of coarser separation of two echoes
+// close together (2 bands: ~2x, 4 bands: ~4x the full sweep's ~3 cm in Quiet).
+let PING_SUB = null;   // array of {I, Q} templates (full sweep length, zero outside the band's piece) or null = 1 band
+function makeSubBands(K, f0, f1) {
+  if (K <= 1) return null;
+  const n = PING.I.length, out = [];
+  for (let k = 0; k < K; k++) {
+    const a = Math.round(k * n / K), b = Math.round((k + 1) * n / K), m = b - a;
+    const c = linChirp(SR, f0 + (f1 - f0) * a / n, f0 + (f1 - f0) * b / n, m / SR, 'hann');
+    const I = new Float32Array(n), Q = new Float32Array(n);
+    I.set(c.I.subarray(0, Math.min(m, c.I.length)), a); Q.set(c.Q.subarray(0, Math.min(m, c.Q.length)), a);
+    out.push({ I, Q });
+  }
+  return out;
+}
 let PING_LOW = null;   // low-band part of the sweep (start of it) for the two-mic timing, or null = use the whole ping
 let AVG = 3;     // consecutive clicks averaged before matched filtering (fewer when clicking slowly)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -351,10 +371,10 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 motion direction';
+const APP_BUILD = '2026-11-18 pitch bands';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
-  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value });
+  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
 function logEv(type, extra) {
   sonarEvents.push(Object.assign({ t: Math.round(performance.now()), wall: new Date().toISOString(), type, seg, running }, extra || {}));
 }
@@ -889,7 +909,7 @@ function frame(binM, binS, t0) {
           for (let j = 0; j < J; j++) {
             const st = d + j * PERIOD, key = key0 + st;
             let ck = CLK.get(key);
-            if (!ck || ck.len !== len || ck.tpl !== PING) {
+            if (!ck || ck.len !== len || ck.tpl !== PING || ck.sub !== PING_SUB) {
               // new click: compress both mics once; near zone: static (phone/hand/direct) part removed and the
               // background taught with this click once
               const a = clickC(xr, st, len, PING, 0), b = clickC(xr, st, len, PING, 1);
@@ -898,7 +918,15 @@ function frame(binM, binS, t0) {
               const rdy = removeStatic(a, b, nearLen, fadeStart, o1, o2, an);
               const m1 = new Float64Array(len), m2 = new Float64Array(len);
               for (let i = 0; i < len; i++) { m1[i] = i < nearLen ? o1[i] : Math.hypot(a.re[i], a.im[i]); m2[i] = i < nearLen ? o2[i] : Math.hypot(b.re[i], b.im[i]); }
-              ck = { len, tpl: PING, m1, m2, an, g: Math.hypot(a.re[0], a.im[0]), rdy };
+              if (PING_SUB) {
+                // beyond the near zone (where the static removal works on the full band): power sum of the band
+                // envelopes, scaled to the full band at the direct sound so levels and thresholds stay comparable
+                const pw = new Float64Array(len);
+                for (const sb of PING_SUB) { const u = clickC(xr, st, len, sb, 0); for (let i = 0; i < len; i++) pw[i] += u.re[i] * u.re[i] + u.im[i] * u.im[i]; }
+                const sc = Math.hypot(a.re[0], a.im[0]) / (Math.sqrt(pw[0]) || 1);
+                for (let i = nearLen; i < len; i++) m1[i] = sc * Math.sqrt(pw[i]);
+              }
+              ck = { len, tpl: PING, sub: PING_SUB, m1, m2, an, g: Math.hypot(a.re[0], a.im[0]), rdy };
               if (PING_LOW) { ck.la = clickC(xr, st, nb, PING_LOW, 0); ck.lb = clickC(xr, st, nb, PING_LOW, 1); }
               CLK.set(key, ck);
             }
@@ -1037,6 +1065,7 @@ async function start(keep) {
   if (P.lowTo && !P.updown) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
   else PING_LOW = null;
   PING_FC = (f0 + f1) / 2; PING_T = PING.I.length / SR; PING_B = f1 - f0;
+  PING_SUB = P.updown ? null : makeSubBands(+$('bands').value || 1, f0, f1);
   MN_TPL = P.lowTo ? PING_LOW : PING; MN_FC = P.lowTo ? (f0 + P.lowTo) / 2 : (P.fc || (f0 + f1) / 2);
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
@@ -1101,6 +1130,7 @@ function showViewHelp() { const m = $('dirf').value === 'map'; $('howmap').style
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
 $('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
+$('bands').onchange = () => { if (running) { stop(); start(true); } };
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(true); } };
 drawFrame(null, 5);
@@ -1130,7 +1160,7 @@ function buildSens(keep) {
   sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   sel.value = opts.some(o => o[0] === keep) ? keep : opts[0][0];
 }
-const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol', 'walls'];
+const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol', 'walls', 'bands'];
 let savedSt = {};
 try { savedSt = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); } catch (e) { }
 for (const k of SAVED) {
