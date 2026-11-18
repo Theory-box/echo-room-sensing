@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiethum">Quiet + hum (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -96,12 +96,28 @@ const PINGS = {
   // tone can be separated exactly. The radar shows nothing in this mode; it only records (raw audio + motion) for
   // offline analysis.
   hum: { sig: null, amp: 0.9, hum: true },
+  // EXPERIMENT (2026-11-18): Quiet clicks moved up to 18.5-22 kHz + a steady hum of HYB_N tones below them
+  // (16.32-18.0 kHz, 240 Hz apart = whole cycles every 200 samples, and every click period is a multiple of 200 at
+  // 2/4/8/15 clicks/s, so the loop is seamless). The map runs on the clicks as usual; the hum is for millimetre phone
+  // tracking (analysed offline from the raw recording for now). Costs: click band 3.5 kHz instead of 6 (distance
+  // detail ~5 cm instead of ~3), and the speaker's power is shared (clicks ~0.6, hum ~0.3 of full scale).
+  quiethum: { sig: null, amp: 0.6, fill: 0.5, f0: 18500, f1: 22000, fc: 20250, hybrid: true },
 };
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
 let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
 let HUM = false;
+const HYB_N = 8, HYB_DF = 240, HYB_F0 = 16320, HYB_AMP = 0.3;
+function hybridHum(len) {   // HYB_N tones over len samples (len a multiple of 200), fixed pseudo-random phases, peak 1
+  const x = new Float32Array(len); let seed = 4242;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const ph = Array.from({ length: HYB_N }, () => 2 * Math.PI * rnd());
+  for (let i = 0; i < len; i++) { let v = 0; for (let k = 0; k < HYB_N; k++) v += Math.cos(2 * Math.PI * (HYB_F0 + HYB_DF * k) * i / SR + ph[k]); x[i] = v; }
+  let m = 0; for (const v of x) m = Math.max(m, Math.abs(v));
+  for (let i = 0; i < len; i++) x[i] /= m;
+  return { x, ph };
+}
 function humLoop() {   // HUM_N tones, fixed pseudo-random phases (low peak level), peak-normalised to 1
   const x = new Float32Array(HUM_LOOP); let seed = 12345;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -407,7 +423,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 hum experiment';
+const APP_BUILD = '2026-11-18 hybrid hum';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -1222,6 +1238,11 @@ async function start(keep) {
     PING = PING_UP; PING_LOW = null; loopLen = 2 * PERIOD;
     play = new Float32Array(2 * PERIOD);
     for (let i = 0; i < n; i++) { play[i] = P.amp * vol * PING_UP.I[i]; play[PERIOD + i] = P.amp * vol * PING_DN.I[i]; }
+  } else if (P.hybrid) {
+    PING_UP = PING_DN = LOW_UP = LOW_DN = null;
+    const h = hybridHum(PERIOD); play = new Float32Array(PERIOD);
+    for (let i = 0; i < PERIOD; i++) play[i] = vol * (HYB_AMP * h.x[i] + (i < PING.I.length ? P.amp * PING.I[i] : 0));
+    logEv('hum', { tones: HYB_N, f0: HYB_F0, df: HYB_DF, block: SR / HYB_DF, loop: PERIOD, amp: HYB_AMP, phases: h.ph.map(v => +v.toFixed(4)) });
   } else {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     play = new Float32Array(PING.I.length);
@@ -1244,7 +1265,7 @@ function saveLog(partial) {
     Native.newSession();
     // last 20 s of both mics as a 32-bit float WAV (ch1 bottom, ch2 back), for checking the processing offline
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || PINGS[$('ping').value].hybrid ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),

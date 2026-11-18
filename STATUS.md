@@ -646,3 +646,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   0.4–1.2 mm sd (range 2.7–4.8 mm) vs the sensor's 2.3–11 mm → the hum is the steadier motion measure at rest.
   Individual slots slip (disagree ~4 cm from the median); the median is robust. One recording; the sensor is not a
   precise truth. Script: analysis/hum_real_test.py.
+- **Build "hybrid hum" (2026-11-18): ping "Quiet + hum (experiment)".** Clicks 18.5–22 kHz (amplitude 0.6, pitch
+  bands as set) + 8 steady tones 16.32–18.0 kHz, 240 Hz apart (whole cycles every 200 samples; every click period at
+  2/4/8/15 per s is a multiple of 200 → seamless loop; amplitude 0.3). Treated as Quiet everywhere (name starts with
+  "quiet"). Map runs on the clicks; raw audio saved for 40 s; hum analysed offline (analysis/hum_track.py, needs a
+  band filter 16.0–18.25 kHz first: without it the clicks leak into the tones and tracking fails completely).
+  Sim: map 39/48 walls, 4 false (plain Quiet 39/5), directions slightly rougher at 8/s; hum track with clicks on 1.3 mm
+  rms over 9 cm (corr 0.998). Costs: click band 3.5 vs 6 kHz (~5 vs ~3 cm detail) and shared speaker power; the real
+  speaker is weaker at 18.5–22 kHz than the sim assumes. Installed; not yet tried on the phone.
