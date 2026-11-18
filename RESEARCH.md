@@ -137,3 +137,38 @@ with fill 0.5 and the range-fit rule).
 - For us: object-scale SAR on phones is proven; room-scale wall imaging this way isn't. The known blocker is the hand's
   path. A lazy Susan (phone at an offset from the centre, rotation from the gyro) gives a known circular aperture — same
   idea as the UW turntable, but rotating the phone.
+
+## Standards checklist (sonar / radar / phone acoustic sensing), researched 2026-11-17
+Ranked by value for effort; checked against our code where noted.
+1. Coherent integration limit (radar CPI): we fold RAW samples over 2–4 clicks before the matched filter. At Quiet's
+   λ≈1.8 cm the echo phase turns once per ~0.9 cm of round-trip-halved motion, so hand/turn motion of 5–15 cm/s
+   (0.3–1 cm per click at 15/s) partly CANCELS moving echoes in the fold (walls while turning). Fix: compress each click
+   and average envelopes (non-coherent), or coherent only after motion compensation. High / small. [checked: real]
+2. Tracker-aided phase unwrapping (LLAP, Strata, weather-radar dealiasing): done 2026-11-17 (per-echo tracks).
+3. Velocity-ambiguity resolution: staggered click periods (CRT), up/down pairs (rejected here: harmonics), sub-band
+   synthetic wavelength (untested idea).
+4. LFM range–Doppler coupling Δτ = f_d·Tp/B: Quiet (50 ms, 6 kHz) at 0.15 m/s ≈ 2–3 cm range bias; correct with tracked speed.
+5. Window the matched-filter reference (Hamming/Taylor) to push direct-sound range sidelobes toward −40 dB (cost ~1 dB).
+6. Static/direct-path removal (LLAP static vector, Strata CIR differencing, MTI): slow running average of the complex
+   response near the phone, subtracted → smaller blind zone. (= earlier back-burner "subtract direct signal".)
+7. OS-CFAR along range (Rohling 1983) instead of median+offset; noise from past max range.
+8. Track management: gating + nearest-neighbour assignment, confirm 3-of-5, coast, delete; map/show confirmed only.
+9. Pre-whitening from the measured response (regularised): we found full rebalancing costs echo energy on this phone;
+   regularised/mild only, if ever.
+10. Harmonics: exponential sweep or lower drive (see distortion section).
+11. Range–Doppler map (FFT over 8–16 clicks per range bin).
+12. Doppler ego-motion (Kellner et al. 2013): fit phone velocity to static echoes' radial speeds (RANSAC), movers = outliers.
+13. TVG: 1/r for walls (ours), 1/r² for points, + air absorption ~0.3–0.6 dB/m at 20 kHz (uncertain).
+14. GCC-PHAT + sub-sample interpolation for the two-mic delay.
+15. Sonar occupancy grids (Elfes, Konolige MURIEL, Leonard & Durrant-Whyte RCDs): carve only to the first confirmed
+    echo; weak free evidence for missing returns; clamp; regions of constant depth → put the wall at the RCD centre
+    (wall normal) instead of smearing the arc.
+16. Bistatic offset per mic (bottom mic next to the speaker → negligible for ch1).
+17–18. DPCA/PGA synthetic aperture, track-before-detect: later.
+Already standard: long LFM + taper, periodic circular processing, direct path = time zero, UNPROCESSED 48 kHz, adaptive
+threshold + noise gate, multiples suppression, normalized two-mic correlation, log-odds grid with beam model/carving.
+Refs: LLAP https://samsonsjarkal.github.io/KeSun/files/mobicom16_ultrasound.pdf · Strata
+https://www.cs.sjtu.edu.cn/~yichao/pmwiki/assets/publications/mobisys17_strata.pdf · Kellner ego-motion
+https://unpaywall.org/10.1109%2FITSC.2013.6728341 · radar odometry survey https://arxiv.org/pdf/2307.07861 · acoustic
+sensing survey https://arxiv.org/pdf/1901.03450 · Konolige MURIEL https://unpaywall.org/10.1023%2FA%3A1008806422571 ·
+staggered PRF https://arxiv.org/pdf/2111.01246 · GCC-PHAT https://speechprocessingbook.aalto.fi/Enhancement/tdoa.html
