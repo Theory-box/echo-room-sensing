@@ -710,3 +710,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   "phone moved … mm (sound)". Replay of the 14:23 push run through the app's own code: correlation −0.71 with the
   sensor's forward movement at +171 ms, scale 0.23 (offline: −0.69, 0.18). Size still uncalibrated (needs a known
   movement, e.g. sliding the phone one paper length on a table). Not yet used for distances or front/back.
+- **Pilot calibration (2026-11-18 14:35:00, phone resting on a table 0–7 s, moved by hand about one paper length
+  toward the wall, resting again).** Echo distance to the wall 0.993 → 0.743 m = 25.0 cm moved (paper 27.9 cm). The
+  live pilot tracker: −6.25 cm → reads ~0.25× the real movement (same shortfall as vs the sensor: 0.18–0.31), so the
+  sensor's size was roughly right and the pilots under-read ~4×. Offline variants (median / power-weighted step /
+  all slots / per-pilot without a profile; static-average 3 or 10 s) all read 4.3–8.3 cm → not the way slots are
+  combined; most likely the pilots hear a MIX of reflections whose phases turn at different rates and partly cancel,
+  losing whole cycles. First try at following one echo's own phase with all 256 tones (MilliSonic-style: coarse
+  peak + fine phase, 190/s) locked onto a stronger static reflection at ~0.84 m instead of the wall → needs proper
+  echo selection. Scripts: analysis/pilot_calibration.py, analysis/echo_phase_follow.py.
