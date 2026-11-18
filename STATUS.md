@@ -378,3 +378,7 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   routes are 48 kHz only; speaker weak >20 kHz), system ultrasound path (privileged; same speaker, same 48 kHz route),
   combining speakers/mics for higher rates (anti-alias filters, linear superposition), exotic sound shapes (a still
   room is linear: any full-band sound measures the same response).
+- **Log v2 (2026-11-17):** events (start / restart with full settings, stop by user or system + reason, clear,
+  every setting change, stalls, errors, eq) with wall-clock times; every frame carries seg (new at each Start and Clear —
+  analyse within a segment only), raw yaw, direct-sound level (drift = speaker protection?), noise, threshold, gyro rate,
+  tilt (pitch/roll from gravity), processing ms. Long sessions are saved in parts (nothing dropped).

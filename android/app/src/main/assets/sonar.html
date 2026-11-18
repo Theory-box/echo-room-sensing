@@ -232,6 +232,15 @@ function renderMap(maxR) {
 // ---------- processing ----------
 let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
+// ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
+// seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
+const APP_BUILD = '2026-11-17 log v2';
+let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
+const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
+  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value });
+function logEv(type, extra) {
+  sonarEvents.push(Object.assign({ t: Math.round(performance.now()), wall: new Date().toISOString(), type, seg, running }, extra || {}));
+}
 // heading history, so each click is drawn at the heading the phone had when that click was recorded
 const yawHist = [];
 setInterval(() => {
@@ -430,7 +439,7 @@ async function loop(gen) {
   const binM = 0.03, binS = binM * 2 / C * SR;
   while (running && gen === loopGen) {
     const t0 = performance.now();
-    try { frame(binM, binS, t0); } catch (e) { $('status').textContent = 'Processing error: ' + e.message; }
+    try { frame(binM, binS, t0); } catch (e) { $('status').textContent = 'Processing error: ' + e.message; if (e.message !== lastErr) { lastErr = e.message; logEv('error', { msg: String(e.message).slice(0, 200) }); } }
     await sleep(Math.max(10, PERIOD / SR * 1000 - (performance.now() - t0)));
   }
 }
@@ -443,7 +452,7 @@ function frame(binM, binS, t0) {
     const frames = +s.slice(0, k);
     if (frames === lastFrames) {   // recording not advancing
       if (!staleSince) staleSince = t0;
-      if (t0 - staleSince > 2000) $('status').textContent = 'Recording stalled (mic busy or audio route changed). Press Stop, then Start.';
+      if (t0 - staleSince > 2000) { if ($('status').textContent.indexOf('stalled') < 0) logEv('stall'); $('status').textContent = 'Recording stalled (mic busy or audio route changed). Press Stop, then Start.'; }
       return;
     }
     lastFrames = frames; staleSince = 0;
@@ -466,7 +475,7 @@ function frame(binM, binS, t0) {
       }
       // speaker equalizer: after ~6 clicks of the flat sweep, measure and restart with the shaped sweep
       if (UD && PINGS[$('ping').value].eq && !EQW && ++eqFrames >= 6 && !eqPending) {
-        EQW = measureEq(x.subarray(d, d + T)); eqPending = true;
+        EQW = measureEq(x.subarray(d, d + T)); eqPending = true; logEv('eq', { w: EQW.map(v => +v.toFixed(2)) });
         setTimeout(() => { eqPending = false; if (running) { stop(); start(true); } }, 0);
       }
       const o = JSON.parse(Native.orientation());
@@ -511,9 +520,13 @@ function frame(binM, binS, t0) {
       }
       const front = kept.filter(q => q.dir === 'ahead' || q.dir === '?');   // distance readout: confirmed-ahead (or, in Quiet, any) echoes
       // log every picked echo (saved to the phone when the sonar stops) for tuning
-      sonarLog.push({ t: Math.round(performance.now()), h: Math.round(theta), dl: +directLag.toFixed(1),
-        avg, e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2)]) });
-      if (sonarLog.length > 4000) sonarLog.shift();
+      const g = o.g || [0, 0, 9.8], gn = Math.hypot(g[0], g[1], g[2]) || 9.8;
+      sonarLog.push({ t: Math.round(performance.now()), seg, h: Math.round(theta), yaw: +yawUse.toFixed(1), dl: +directLag.toFixed(1),
+        avg, pk: +(20 * Math.log10(peak + 1e-12)).toFixed(1), nz: +(20 * Math.log10(noise)).toFixed(1), thr: +lastThr.toFixed(1),
+        gy: +gyroMax(PERIOD / SR * 1000 * (avg + 1)).toFixed(2), tilt: [+(Math.asin(Math.max(-1, Math.min(1, g[1] / gn))) * 180 / Math.PI).toFixed(0),
+        +(Math.asin(Math.max(-1, Math.min(1, g[0] / gn))) * 180 / Math.PI).toFixed(0)], ms: Math.round(performance.now() - t0),
+        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2)]) });
+      if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       const mapMode = $('dirf').value === 'map';
@@ -561,32 +574,34 @@ async function start(keep) {
     for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
-  if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; try { Native.sonarRestoreVolume(); } catch (e) { } return; }
+  if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
   running = true; lastFrames = -1; staleSince = 0;
-  if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); }
+  if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
+  logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
   $('go').textContent = 'Stop';
   await sleep(300);
   if (running && gen === loopGen) loop(gen);
 }
-function saveLog() {
-  if (!sonarLog.length) return;
+function saveLog(partial) {
+  if (!sonarLog.length && !sonarEvents.length) return;
   try {
     Native.newSession();
-    Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v1', time: new Date().toISOString(),
-      settings: { eq: EQW && EQW.map(v => +v.toFixed(2)), rate: $('rate').value, vol: $('vol').value, ping: $('ping').value, sens: $('sens').value, mask: $('mask').value,
-                  range: $('range').value, dirFilter: $('dirf').value },
-      format: 'e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b, back-mic echo dB over its noise, mic shape match -1..1]; h = heading deg at click time; dl = direct-sound lag; avg = extra clicks folded', frames: sonarLog }));
+    Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
+      part: logPart, partial: !!partial,
+      settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      events: sonarEvents, frames: sonarLog }));
   } catch (e) { }
-  sonarLog = [];
+  sonarLog = []; sonarEvents = []; logPart = partial ? logPart + 1 : 0;
 }
 function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
 // user-initiated stop (button / Back): also hand the media volume back and save the log; restarts for setting
 // changes keep both going
-function stopByUser() { stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
-window.onSonarStopped = why => { running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
+function stopByUser() { logEv('stop', { by: 'user' }); stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
+window.onSonarStopped = why => { if (running) logEv('stop', { by: 'system', why: why || 'app paused / left' }); running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start(false);
-$('clear').onclick = () => { clearAcc(); clearMap(); yaw0 = null; };
+$('clear').onclick = () => { seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
@@ -637,6 +652,7 @@ buildView(savedSt.dirf);
 $('volv').textContent = $('vol').value + '%';
 function saveSettings() { try { const st = {}; for (const k of SAVED) st[k] = $(k).value; localStorage.setItem('sonarSettings2', JSON.stringify(st)); } catch (e) { } }
 for (const k of SAVED) $(k).addEventListener('change', saveSettings);
+for (const k of SAVED) $(k).addEventListener('change', () => logEv('setting', { name: k, value: $(k).value }));
 
 placeButtons();
 showViewHelp();
