@@ -690,3 +690,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   profile's shape is unchanged. Sim map: walls 16/16 found (plain tones 12/16), fewer stray crossings (1.2–1.3 vs
   2.7–2.9 echoes per reading). Motion from the pilots: analysis ready (analysis/tones_motion.py, motion_track_pilots);
   needs a real recording.
+- **Pilots on the phone (2026-11-18 14:19, 48 s; still → push → full turn).** Map vs the 14:04 Quiet tones run (same
+  spot): echoes per second 49.5 vs 34.2, confirmed per second 34.2 vs 23.4, walls/min 21 vs 21, direct-sound level
+  identical (−60.8 vs −60.9 dB → playback level unchanged despite the media-volume remark), noise re direct −64.3 vs
+  −71.0 dB. The −1.8 dB map-tone cost doesn't show as a loss. Motion from the pilots: inconclusive — the 40 s raw
+  window started at 8.3 s, so the still part and most of the push (4–12 s) were cut; on what remains (mostly turning)
+  correlation ≤ 0.42 with the best lag at the search edge = no real match. Needs a recording whose pushes fall in
+  the last 40 s.
