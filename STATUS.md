@@ -762,3 +762,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   trip, but read the 43 cm move as 6.1 cm (picking the phone up — lift, tilt, hand over it, table reflection changing —
   breaks the phase count). The wall echo itself measured both moves correctly. The hum band is audible (15.25 kHz at 3×).
   Lesson: the speaker's 16–18 kHz range is the map's most valuable band; motion tones must not take it.
+- **Echo-based phone movement and the wobble split (2026-11-18, offline on existing recordings).**
+  Common-mode shift of confirmed echoes between readings (median over tracks): at rest drift sd 0.13 cm; hand-held
+  pushes vs the sensor: corr 0.60–0.61, scale 0.65–1.33 (pilots on the same run: 0.17); but the 25 cm table move read
+  8.1 cm (tracks break when the phone is lifted). Whole-profile scan matching (keyframe, normalised correlation):
+  table move 15.7 cm, pushes corr 0.32 / 0.74 — lifting/tilting scrambles the echoes.
+  **Key finding — wobble split:** per track, 1-s distance wobble before vs after removing the shared shift estimated
+  from the OTHER echoes (leave-one-out): Quiet 1.22→1.47, 1.57→1.24, 1.62→1.63 cm; Quiet tones 1.78→1.80; pilots
+  sessions 0.36→0.86, 0.50→0.59, 0.40→1.48. The wobble is the echoes' own jitter (overlapping reflections), not shared
+  phone sway → motion correction from ANY source (hum, pilots, echoes) can't steady distances much. Motion still
+  matters for front/back (less needed: body shadow) and for multi-spot mapping. Lead to check: pilots sessions showed
+  much lower raw wobble (0.36–0.50 cm vs 1.2–1.8) on few track-seconds (11–33).
