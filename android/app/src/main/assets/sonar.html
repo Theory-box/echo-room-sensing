@@ -261,15 +261,30 @@ const RCD_TOL = 0.04, RCD_MIN = 12, RCD_MAX = 150, RCD_GAP = 15;
 // same distance (+-5 cm, within 0.6-2.2 m) pointing 3+ different ways (45-degree sectors). Real walls keep one
 // direction. (Standing exactly central in a square room would hide its walls too; rare.)
 let WIDE = [], REG = [];
+// 2026-11-18: the old rule (+-5 cm, 3 sectors, every region of the session) marked nearly every distance 0.8-2.1 m as
+// floor in real rooms -- REG fills with walls, clutter and repeat echoes -- so real near walls were hidden while their
+// repeat echoes beyond 2.2 m were drawn. Now +-3 cm (3 of 8 sectors as before). Real rooms showed no strong floor ring
+// (2026-11-18 sessions), the sim floor is far stronger -- tuned on the real sessions.
+let FL_TOL = 0.03, FL_SEC = 3;
 function floorLike(r) {
   if (WIDE.some(x => Math.abs(x - r) < 0.06)) return true;
   if (r <= 0.6 || r >= 2.2) return false;
-  const secs = new Set(REG.filter(g => Math.abs(g[0] - r) < 0.05).map(g => Math.floor((((g[1] % 360) + 360) % 360) / 45)));
-  return secs.size >= 3;
+  const secs = new Set(REG.filter(g => Math.abs(g[0] - r) < FL_TOL).map(g => Math.floor((((g[1] % 360) + 360) % 360) / 45)));
+  return secs.size >= FL_SEC;
 }
-const wallHidden = w => isRing(w.r) || floorLike(w.r);
+// Walls aren't see-through, and a strong echo comes back again at 2x / 3x its distance (sound bouncing between the
+// wall and you). A wall is hidden if a NEARER drawn wall faces the same way (+-20 deg), or if it sits at 2-4x the
+// distance of a nearer region of constant depth in the same direction (+-20 deg; also regions that weren't accepted).
+let NEARREG = [];   // recent regions [r, a] with span >= RCD_MIN (any outcome), for the repeat-echo check
+function ghostOf(w) {
+  for (const v of WALLS) if (v !== w && v.r < w.r - 0.15 && Math.abs(angDiff(v.a, w.a)) < 20 && !isRing(v.r) && !floorLike(v.r)) return true;
+  for (const [r, a] of NEARREG) if (r < w.r - 0.3 && Math.abs(angDiff(a, w.a)) < 20)
+    for (const n of [2, 3, 4]) if (Math.abs(w.r - n * r) < 0.06 + 0.03 * n) return true;
+  return false;
+}
+const wallHidden = w => isRing(w.r) || floorLike(w.r) || ghostOf(w);
 let RUNS = [], WALLS = [], rcdDone = [], UH = 0, UHlast = null, runNext = 1, UHlo = 0, UHhi = 0;
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; }
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; }
 function wallOf(u) {
   const span = u.hi - u.lo;
   let lm = -Infinity; for (const x of u.s) lm = Math.max(lm, x[2]);
@@ -296,7 +311,10 @@ function closeRun(u, why) {
   const span = u.hi - u.lo; if (span < 3) return;           // never turned: nothing to log
   const wl = wallOf(u), ok = runOK(u) && !wallHidden(wl);
   if (why === 'wide') { if (!WIDE.some(x => Math.abs(x - wl.r) < 0.03)) WIDE.push(wl.r); }
-  else if (span >= RCD_MIN) { REG.push([wl.r, wl.a]); if (REG.length > 300) REG.shift(); }
+  else if (span >= RCD_MIN) {
+    REG.push([wl.r, wl.a]); if (REG.length > 300) REG.shift();
+    NEARREG.push([wl.r, wl.a]); if (NEARREG.length > 300) NEARREG.shift();
+  }
   rcdDone.push([u.id, +wl.r.toFixed(2), Math.round(wl.a), Math.round(span), u.n, ok ? 1 : 0, why[0]]);
   if (!ok) return;
   // same wall seen again (another turn, or a piece of it cut off by a dropout): merge, weighted by detections
@@ -371,7 +389,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 rough motion';
+const APP_BUILD = '2026-11-18 ghost walls';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });

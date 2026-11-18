@@ -198,3 +198,10 @@ per session on-axis vs ≥ 20° off differ by −0.3…+2.9 dB, mostly the WRONG
 The phone speaker's beam barely changes between 16 and 22 kHz (only 1.4× in frequency) — far less than the
 click-to-click spread. Untested: Strong (2–12 kHz, 6× in frequency) might show a real effect; no raw Strong recordings.
 Script: analysis/band_ratio_vs_angle.py.
+
+## Brainstorm: "purity" (phase steadiness) filter tested (2026-11-18) — No (Quiet, handheld)
+Per detected echo, coherence of the click-to-click phase step over ±4 clicks (raw audio, 8 Quiet sessions, 8038
+echo-clicks): confirmed 0.40, unconfirmed 0.41, from found walls 0.40 (medians); only near-still moments: 0.36 /
+0.45 / 0.38. No separation: at λ 1.8 cm, ~1 mm of hand tremor already turns the round-trip phase by ~40°, so every echo
+looks equally "impure" handheld. Might work at Strong's longer wavelengths or with the phone resting on something.
+Script: analysis/purity_coherence.py.

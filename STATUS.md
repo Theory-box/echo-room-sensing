@@ -615,3 +615,13 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   confirmed share 68–70 vs 60–62 % — consistent; walls/min 76 / 53 / 21 (new) and 32 / 34 / 22 (old); but 1-s wobble
   1.81 / 1.63 / 1.43 cm (new) vs 1.29 / 1.66 / 1.47 (old) — session-to-session variation is as large as the band
   effect, so the steadiness gain on the phone is NOT established; the detection gain is.
+- **Build "ghost walls" (2026-11-18): far walls drawn instead of the real near wall — fixed in the wall finder.**
+  Cause (replay of 4 sessions through the app's own map + wall finder): the floor/ceiling rule (regions at the same
+  distance ±5 cm in 3+ of 8 directions, over all regions of the session) marked nearly every distance 0.8–2.1 m as
+  "floor-like" in real rooms, so real near walls were rejected/hidden, while their repeat echoes (often exactly 2× the
+  near distance) beyond 2.2 m were exempt and drawn. Real sessions show no strong floor ring (best candidates in only
+  33–67 % of directions). Fix: floor rule ±3 cm; plus walls aren't see-through — a wall is hidden if a nearer drawn wall
+  faces the same way (±20°) or it sits at 2–4× a nearer region in the same direction. Replay: near walls accepted
+  19 / 50 / 30 / 21 (was 14 / 26 / 18 / 14); drawn walls per session 6–10, mostly 0.8–2 m (was 20–29, many 2.4–4.5 m).
+  Sim: walls 39 / 48 (was 43), false walls 5 (was 6) — the sim's floor reflector is far stronger than real floors and
+  pieces of it occlude real walls. Installed; not yet tested on the phone.
