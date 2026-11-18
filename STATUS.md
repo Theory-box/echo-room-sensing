@@ -534,3 +534,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   unsure); sideways push, no motion, or turning only → no wrong calls (unsure). Not tested: the real acceleration-based
   velocity (sensor latency/scale), timing alignment, moving people. Sim note: a near-noiseless sim puts Quiet's Auto
   threshold too high (needs real room clutter) — the motion sim uses High sensitivity.
+- **First real test of "motion direction" (2026-11-18 11:39, Quiet long 15/s, High, 190 s of free sweeping with
+  natural hand motion; not the structured wall test).** Accelerometer stream OK (~100 samples/s). Motion verdicts on
+  21 % of echoes (rest unsure/no phase speed). Against walls the app found (echo at the wall's distance while facing
+  it = truth "ahead"): 402 called ahead vs 158 called behind (72 % right when sure) — not usable yet. Diagnosis:
+  echo approach speed vs phone forward speed correlate only 0.14 (one reading) … 0.24 (1 s smoothing), regression
+  slope ~0.4 at every window; wall echoes' distance jitters 1–2 cm between readings (~±10 cm/s apparent speed; 5–95 %
+  ±20 cm/s) against ~4 cm/s rms real forward hand motion; ~1 in 10 phase speeds slip one carrier turn (13.5 cm/s at
+  15/s). Likely both sides noisy: echo jitter (mixed reflections / speckle at λ 1.8 cm, sway) and the
+  acceleration-based velocity (tilt error leaking gravity during rotation: 1° ≈ 0.17 m/s²). Wall-distance
+  repeatability across regions: median 3 cm before and after "fine distance" (different rooms) — the 1.5 cm rounding
+  was not the dominant real error.
