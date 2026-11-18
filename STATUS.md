@@ -753,3 +753,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   34–40 % of readings (plain tones 88–96 %) → map clearly weaker in sim. Tracker on a second simulated 25 cm move:
   19–41 cm depending on how the static part is estimated (whole-recording mean / running 3 s / no decay) → NOT robust
   yet; the first sim's 24–25 cm was fragile. Installed for a real recording (raw audio 40 s) to tune offline.
+- **Hum band on the phone (2026-11-18 15:17–15:19): fails on both counts.** Map: sweep 3.8 echoes/s, 4 walls/min (Quiet
+  tones 34 / 21, pilots 49 / 21, Quiet 34 / 24) — ~9× fewer. Cause: recorded levels — hum tones 66–91 dB over the
+  background, map tones only 47–60 dB: the hum took 15.25–17.75 kHz, this speaker's loudest range, and pushed the map to
+  17.75–22 kHz where it is weakest (plus the hum's 3× share of the peak budget). Movement (table run: phone resting,
+  picked up and set down ~43 cm closer by the wall echo, then back): live tracker drifted 6.5 cm while untouched and
+  read the 43 cm move as ~5.7 cm; offline tracker steady at rest (within 1 cm) and back near zero after the round
+  trip, but read the 43 cm move as 6.1 cm (picking the phone up — lift, tilt, hand over it, table reflection changing —
+  breaks the phase count). The wall echo itself measured both moves correctly. The hum band is audible (15.25 kHz at 3×).
+  Lesson: the speaker's 16–18 kHz range is the map's most valuable band; motion tones must not take it.
