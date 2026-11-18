@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiethum">Quiet + hum (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -96,27 +96,70 @@ const PINGS = {
   // tone can be separated exactly. The radar shows nothing in this mode; it only records (raw audio + motion) for
   // offline analysis.
   hum: { sig: null, amp: 0.9, hum: true },
-  // EXPERIMENT (2026-11-18): Quiet clicks moved up to 18.5-22 kHz + a steady hum of HYB_N tones below them
-  // (16.32-18.0 kHz, 240 Hz apart = whole cycles every 200 samples, and every click period is a multiple of 200 at
-  // 2/4/8/15 clicks/s, so the loop is seamless). The map runs on the clicks as usual; the hum is for millimetre phone
-  // tracking (analysed offline from the raw recording for now). Costs: click band 3.5 kHz instead of 6 (distance
-  // detail ~5 cm instead of ~3), and the speaker's power is shared (clicks ~0.6, hum ~0.3 of full scale).
-  quiethum: { sig: null, amp: 0.6, fill: 0.5, f0: 18500, f1: 22000, fc: 20250, hybrid: true },
+  // EXPERIMENT (2026-11-18, replaces the click+hum hybrid, which halved detections and whose hum the clicks
+  // disturbed): an all-tone sonar. HS_NT steady tones 16-22 kHz, HS_DF apart, played continuously (no silent gaps:
+  // ~3-5 dB more sound energy than Quiet's half-time clicks). Evenly spaced steady tones = a signal that repeats every
+  // HS_P samples, so each HS_P-sample stretch of the recording gives the room's full response: tone by tone, the
+  // received / played ratio, turned into a distance profile (inverse FFT across the tones). Same band as Quiet ->
+  // same ~3 cm detail; everything after the profile (threshold, tracking, map, walls) is the normal Quiet pipeline.
+  // Echoes beyond HS_P samples (7.3 m) wrap around. The per-tone phase is continuous (the "hum"/hologram signal for
+  // millimetre phone tracking) -- analysed offline from the raw recording for now.
+  quiettones: { sig: null, amp: 0.9, tones: true, f0: 16000, f1: 22000, fc: 19000 },
 };
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
 let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
 let HUM = false;
-const HYB_N = 8, HYB_DF = 240, HYB_F0 = 16320, HYB_AMP = 0.3;
-function hybridHum(len) {   // HYB_N tones over len samples (len a multiple of 200), fixed pseudo-random phases, peak 1
-  const x = new Float32Array(len); let seed = 4242;
-  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const ph = Array.from({ length: HYB_N }, () => 2 * Math.PI * rnd());
-  for (let i = 0; i < len; i++) { let v = 0; for (let k = 0; k < HYB_N; k++) v += Math.cos(2 * Math.PI * (HYB_F0 + HYB_DF * k) * i / SR + ph[k]); x[i] = v; }
+// ---------- all-tone sonar ("Quiet tones") ----------
+const HS_P = 2048, HS_K0 = 683, HS_NT = 256, HS_J = 3, HS_M = 1024;   // tones k*SR/HS_P, k = 683..938 (16.0-22.0 kHz)
+let HS = false, HS_X = null, HS_CI = 0;   // HS_X: played complex amplitude per tone (re, im)
+function toneLoop() {
+  // amplitudes: flat, raised-cosine edges over 16 tones (down to 0.2); Schroeder phases -pi k^2 / N keep the peak low
+  const a = new Float64Array(HS_NT), ph = new Float64Array(HS_NT), E = 16;
+  for (let k = 0; k < HS_NT; k++) {
+    const e = Math.min(k, HS_NT - 1 - k); a[k] = e >= E ? 1 : 0.2 + 0.8 * (0.5 - 0.5 * Math.cos(Math.PI * e / E));
+    ph[k] = -Math.PI * k * k / HS_NT;
+  }
+  const x = new Float64Array(HS_P);
+  for (let k = 0; k < HS_NT; k++) { const w = 2 * Math.PI * (HS_K0 + k) / HS_P; for (let n = 0; n < HS_P; n++) x[n] += a[k] * Math.cos(w * n + ph[k]); }
   let m = 0; for (const v of x) m = Math.max(m, Math.abs(v));
-  for (let i = 0; i < len; i++) x[i] /= m;
-  return { x, ph };
+  const re = new Float64Array(HS_NT), im = new Float64Array(HS_NT);
+  for (let k = 0; k < HS_NT; k++) { re[k] = a[k] / m * Math.cos(ph[k]) * HS_P / 2; im[k] = a[k] / m * Math.sin(ph[k]) * HS_P / 2; }
+  let rms = 0; for (const v of x) rms += (v / m) * (v / m); rms = Math.sqrt(rms / HS_P);
+  return { x: Float32Array.from(x, v => v / m), X: { re, im }, crest: 1 / rms };
+}
+// complex distance profile of one HS_P-sample stretch: tone by tone received / played, Hann across tones (low side
+// lobes, like Quiet's tapered sweep), inverse FFT -> HS_M points over one period (2 samples per point)
+function toneProfile(xr, start, ch) {
+  const re = new Float64Array(HS_P), im = new Float64Array(HS_P);
+  for (let n = 0; n < HS_P; n++) re[n] = xr[2 * (start + n) + ch] || 0;
+  fft(re, im, false);
+  const br = new Float64Array(HS_M), bi = new Float64Array(HS_M);
+  for (let k = 0; k < HS_NT; k++) {
+    const yr = re[HS_K0 + k], yi = im[HS_K0 + k], xr_ = HS_X.re[k], xi = HS_X.im[k], d2 = xr_ * xr_ + xi * xi;
+    const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (k + 1) / (HS_NT + 1));
+    br[k] = w * (yr * xr_ + yi * xi) / d2; bi[k] = w * (yi * xr_ - yr * xi) / d2;
+  }
+  fft(br, bi, true);
+  return { re: br, im: bi };
+}
+// the latest HS_J whole periods of the reading -> the same outputs the click pipeline produces (direct sound at 0)
+function hsProfiles(xr, L, maxR) {
+  const nb = Math.min(HS_P - 300, Math.round(2 * maxR / C * SR)), o = L - HS_J * HS_P;
+  const m1 = new Float64Array(HS_M), m2 = new Float64Array(HS_M);
+  for (let j = 0; j < HS_J; j++) {
+    const a = toneProfile(xr, o + j * HS_P, 0), b = toneProfile(xr, o + j * HS_P, 1);
+    for (let p = 0; p < HS_M; p++) { m1[p] += Math.hypot(a.re[p], a.im[p]) / HS_J; m2[p] += Math.hypot(b.re[p], b.im[p]) / HS_J; }
+  }
+  const pd = argmax(m1, 0, HS_M), step = HS_P / HS_M;
+  const at = (m, i) => { const q = pd + i / step, p0 = Math.floor(q), f = q - p0; return (1 - f) * m[((p0 % HS_M) + HS_M) % HS_M] + f * m[(((p0 + 1) % HS_M) + HS_M) % HS_M]; };
+  const env = new Float64Array(HS_P), env2 = new Float64Array(HS_P);
+  for (let i = 0; i < HS_P; i++) { env[i] = at(m1, i); env2[i] = at(m2, i); }
+  const raw = env.subarray(0, nb), raw2 = env2.subarray(0, nb), peak = env[0] + 1e-12;
+  const tail = env.subarray(nb, HS_P - 200), tail2 = env2.subarray(nb, HS_P - 200);
+  HS_CI = o + HS_J * HS_P / 2;
+  return { raw, raw2, peak, noise: pct(tail, 0.3) / peak + 1e-9, noise2: pct(tail2, 0.3) + 1e-12, d: 0, env, env2, nb, T: 0 };
 }
 function humLoop() {   // HUM_N tones, fixed pseudo-random phases (low peak level), peak-normalised to 1
   const x = new Float32Array(HUM_LOOP); let seed = 12345;
@@ -423,7 +466,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 hybrid hum';
+const APP_BUILD = '2026-11-18 quiet tones';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -986,7 +1029,7 @@ function frame(binM, binS, t0) {
     // average fewer clicks while turning quickly (clicks at different headings shouldn't be mixed)
     const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? Math.min(2, AVG) : AVG;   // fewer clicks when turning fast (heading smear); >= 2 keeps the speed measurement
     const UD = !!PING_UP, np2 = Math.max(1, Math.ceil((avg + 1) / 2));      // alternating: fold whole up+down pairs
-    const L = UD ? np2 * 2 * PERIOD : (avg + 1) * PERIOD;
+    const L = HS ? (HS_J + 1) * HS_P : UD ? np2 * 2 * PERIOD : (avg + 1) * PERIOD;
     const s = Native.sonarReadBoth(L), k = s.indexOf('|');
     const frames = +s.slice(0, k);
     if (frames === lastFrames) {   // recording not advancing
@@ -996,7 +1039,7 @@ function frame(binM, binS, t0) {
     }
     lastFrames = frames; staleSince = 0;
     if (s.length > k + 1) {
-      const xr = b64ToF32(s.slice(k + 1)), np = UD ? np2 : avg + 1, PL = UD ? 2 * PERIOD : PERIOD;
+      const xr = b64ToF32(s.slice(k + 1)), np = HS ? 0 : UD ? np2 : avg + 1, PL = UD ? 2 * PERIOD : PERIOD;
       // fold all np recorded loops (one click, or one up+down pair) into one, then repeat it twice (circular correlation)
       const x = new Float32Array(2 * PL), x2 = new Float32Array(2 * PL);
       for (let i = 0; i < PL; i++) {
@@ -1004,7 +1047,8 @@ function frame(binM, binS, t0) {
         x[i] = x[i + PL] = a / np; x2[i] = x2[i + PL] = b / np;
       }
       let raw, peak, noise, d, env, nb, T, env2, raw2, noise2, tA = null, tB = null;
-      if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
+      if (HS) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T } = hsProfiles(xr, L, +$('range').value));
+      else if (UD) ({ raw, raw2, peak, noise, noise2, d, env, env2, nb, T, tA, tB } = pairProfiles(x, x2, +$('range').value));
       else {
         ({ raw, peak, noise, d, env, nb, T } = profileFrom(x, +$('range').value));
         d = lockD(d, frames, L);
@@ -1018,7 +1062,7 @@ function frame(binM, binS, t0) {
       // while moving only echoes at 0 / 13.5 / 27 cm/s... survived (2026-11-17 logs). The fold is still used to find the
       // direct sound (time zero) and for the mic self-check: it doesn't move relative to the phone.
       let mnCs = null, bgReady = false, clickJ = avg;
-      if (!UD) {
+      if (!UD && !HS) {
         const len = PERIOD - T, J = Math.floor((L - d - PERIOD) / PERIOD) + 1;   // clicks whose full period is recorded
         clickJ = J;
         if (J >= 1) {
@@ -1076,7 +1120,7 @@ function frame(binM, binS, t0) {
       // when the analysed clicks were recorded: the folded clicks sit at d + j*P (j = 0..avg); use their middle,
       // plus half the sweep length (centre of the sweep), counted back from the buffer end
       // non-UD: the clicks used are j = 0..clickJ-1 at d + j*P -> their centre, plus half the sweep
-      const clickIdx = UD ? d % PERIOD + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + (clickJ - 1) * PERIOD / 2 + T / 2;
+      const clickIdx = HS ? HS_CI : UD ? d % PERIOD + (np2 - 1) * PERIOD + PERIOD / 2 + T / 2 : d + (clickJ - 1) * PERIOD / 2 + T / 2;
       // when the clicks were captured: from the recorder's capture clock (same clock as the motion sensors) if the phone
       // gives it, else the old estimate (sample count back from the buffer end + ~40 ms latency)
       let ageMs = (L - clickIdx) / SR * 1000 + 40, clkSrc = 'g';
@@ -1224,7 +1268,7 @@ async function start(keep) {
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
   let play, loopLen = PERIOD;
-  HUM = !!P.hum;
+  HUM = !!P.hum; HS = !!P.tones;
   if (HUM) {
     PERIOD = HUM_LOOP; loopLen = HUM_LOOP; PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     const h = humLoop(); play = new Float32Array(HUM_LOOP);
@@ -1238,11 +1282,11 @@ async function start(keep) {
     PING = PING_UP; PING_LOW = null; loopLen = 2 * PERIOD;
     play = new Float32Array(2 * PERIOD);
     for (let i = 0; i < n; i++) { play[i] = P.amp * vol * PING_UP.I[i]; play[PERIOD + i] = P.amp * vol * PING_DN.I[i]; }
-  } else if (P.hybrid) {
+  } else if (P.tones) {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
-    const h = hybridHum(PERIOD); play = new Float32Array(PERIOD);
-    for (let i = 0; i < PERIOD; i++) play[i] = vol * (HYB_AMP * h.x[i] + (i < PING.I.length ? P.amp * PING.I[i] : 0));
-    logEv('hum', { tones: HYB_N, f0: HYB_F0, df: HYB_DF, block: SR / HYB_DF, loop: PERIOD, amp: HYB_AMP, phases: h.ph.map(v => +v.toFixed(4)) });
+    const h = toneLoop(); HS_X = h.X; play = new Float32Array(HS_P); loopLen = HS_P; PERIOD = 2 * HS_P;   // a reading every ~85 ms
+    for (let i = 0; i < HS_P; i++) play[i] = P.amp * vol * h.x[i];
+    logEv('tones', { n: HS_NT, k0: HS_K0, period: HS_P, crest: +h.crest.toFixed(2) });
   } else {
     PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     play = new Float32Array(PING.I.length);
@@ -1265,7 +1309,7 @@ function saveLog(partial) {
     Native.newSession();
     // last 20 s of both mics as a 32-bit float WAV (ch1 bottom, ch2 back), for checking the processing offline
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || PINGS[$('ping').value].hybrid ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || HS ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),

@@ -663,3 +663,13 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   after band filtering → the clicks modulate the hum in the phone itself (speaker protection / limiter pumping, or
   intermodulation). Removing a common per-block gain or the per-click repeating pattern offline didn't fix it. That
   session also had less forward movement (1.1 cm rms vs 2–2.6). Hybrid as built: worse on both counts.
+- **Build "quiet tones" (2026-11-18): all-tone sonar, ping "Quiet tones (experiment)"; the click+hum hybrid is
+  removed (Hum records-only kept).** 256 steady tones 16.0–22.0 kHz, 23.44 Hz apart (= a signal repeating every
+  2048 samples, 42.7 ms; echoes beyond 7.3 m wrap around), flat with raised-cosine edges, Schroeder phases (low peak),
+  played continuously. Each 2048-sample stretch → per tone received/played → Hann across tones → inverse FFT =
+  complex distance profile (2 samples per point, ~3 cm detail as Quiet); 3 stretches averaged per reading, a reading
+  every ~85 ms; direct sound = strongest point = distance 0; then the normal Quiet pipeline (threshold, tracking, map,
+  walls). Pitch-bands and click-rate settings don't apply. Raw audio 40 s saved. Sim (harness clock fixed for this
+  mode): echoes per reading 2.7–2.9 vs ~1.0 for Quiet, wall echo present in 88–96 % of readings vs 43–68 %,
+  distance error median 0.25–0.4 cm (same), walls 12/16 both, worst direction 4.6° vs 9.9°. The sim speaker is ideal;
+  not yet tried on the phone. Next if it holds: hum-phase motion → front/back (replacing the accelerometer).
