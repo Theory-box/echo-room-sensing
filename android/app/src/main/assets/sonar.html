@@ -654,7 +654,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 room box rings';
+const APP_BUILD = '2026-11-18 settings per mode';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -1543,9 +1543,19 @@ $('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); resetTr
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
-function showViewHelp() { const m = $('dirf').value === 'map'; $('howmap').style.display = m ? '' : 'none'; $('wallsrow').style.display = m ? '' : 'none'; }
+// Only show the settings the chosen mode actually uses (2026-11-18): Clicks/s not for the tone modes / Hum (they set
+// their own pace) or modes with a fixed rate; Pitch bands only for click modes; Hum records only, so no view/range/
+// sensitivity/near-zone settings; Walls + Room box only in Map view.
+function showViewHelp() {
+  const P = PINGS[$('ping').value] || {}, show = (id, on) => { const l = $(id).closest('label'); if (l) l.style.display = on ? '' : 'none'; };
+  show('rate', !(P.tones || P.hum || P.rate));
+  show('bands', !(P.tones || P.hum || P.updown));
+  for (const id of ['range', 'sens', 'mask', 'dirf']) show(id, !P.hum);
+  const m = $('dirf').value === 'map' && !P.hum;
+  $('howmap').style.display = m ? '' : 'none'; $('wallsrow').style.display = m ? '' : 'none';
+}
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
-$('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
+$('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) clearAcc(); showViewHelp(); saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('bands').onchange = () => { if (running) { stop(); start(true); } };
 $('roombox').onchange = () => { if (!running) return; RBOX = { h: [], r: [], last: 0, fit: null }; };

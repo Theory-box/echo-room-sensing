@@ -796,3 +796,6 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   same-spot sweeps: both pilots sessions 8.9 × 8.9 → 2.73 × 2.90 / 2.77 × 2.83 m; all others unchanged. (Without the
   "≥ 3 per sector" rule two sessions got worse; at 5 or 8 per sector a pilots session failed again.) Pilots artefact
   itself not investigated.
+- **Settings per mode (2026-11-18):** the settings rows now show only what the chosen ping uses — Clicks/s hidden for
+  Quiet tones / pilots / Hum and the fixed-rate 3-mic test; Pitch bands only for click modes; Hum shows only Ping and
+  Volume; Walls / Room box only in Map view (and not for Hum). Updated on every ping or view change.
