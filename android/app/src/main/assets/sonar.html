@@ -445,6 +445,56 @@ function removeStatic(a, b, nearLen, fadeStart, o1, o2, c1) {
   return ready;
 }
 
+// ---------- echo tracking (standard radar practice) ----------
+// Each echo becomes a track with an id, a smoothed distance and speed (alpha-beta filter, speed from the phase
+// measurement when it's reliable). Each click: predict, gate (6 cm + expected movement), assign nearest-first, update.
+// A track is SHOWN once confirmed: >= 3 hits spread over MORE than J+1 readings (gaps allowed). Readings overlap (each
+// averages the last J clicks), so a one-off junk click shows up in exactly J back-to-back readings and can't qualify,
+// while a real but flickery echo (weak walls in Quiet) can. A confirmed track that misses readings is kept up to 4
+// readings at its predicted distance, faded (coasting); tentative tracks die after 4 misses.
+let TRK = [], trkNext = 1;
+function resetTracks() { TRK = []; }
+const bitsN = v => { let c = 0; for (let i = 0; i < 8; i++) c += (v >> i) & 1; return c; };
+let trkFrame = 0;
+function trackEchoes(kept, tNow, J) {
+  trkFrame++;
+  const span = (J || 1) + 1;
+  for (const t of TRK) { t.dt = Math.max(1e-3, (tNow - t.t) / 1000); t.rp = t.r - t.v * t.dt; }
+  const pairs = [];
+  kept.forEach((q, qi) => TRK.forEach((t, ti) => {
+    const dist = Math.abs(q.r - t.rp), gate = 0.06 + Math.min(0.15, Math.abs(t.v) * t.dt);
+    if (dist <= gate) pairs.push([dist, qi, ti]);
+  }));
+  pairs.sort((a, b) => a[0] - b[0]);
+  const qUsed = new Set(), tUsed = new Set();
+  for (const [, qi, ti] of pairs) {
+    if (qUsed.has(qi) || tUsed.has(ti)) continue;
+    qUsed.add(qi); tUsed.add(ti);
+    const q = kept[qi], t = TRK[ti], res = q.r - t.rp;
+    t.r = t.rp + 0.6 * res;
+    if (q.v != null && q.vq >= 0.5) t.v += 0.5 * (q.v - t.v);   // + = getting closer
+    else t.v -= 0.3 * res / t.dt;
+    t.v = Math.max(-1.5, Math.min(1.5, t.v));
+    t.t = tNow; t.hits = ((t.hits << 1) | 1) & 255; t.nh++; t.lastF = trkFrame; t.miss = 0; t.q = q; t.last = q; t.l = q.l;
+    q.tid = t.id;
+  }
+  TRK.forEach((t, ti) => { if (!tUsed.has(ti)) { t.hits = (t.hits << 1) & 255; t.miss++; t.q = null; t.r = t.rp; t.t = tNow; } });
+  kept.forEach((q, qi) => {
+    if (qUsed.has(qi)) return;
+    const t = { id: trkNext++, r: q.r, v: q.v != null && q.vq >= 0.5 ? q.v : 0, t: tNow, hits: 1, nh: 1, firstF: trkFrame, lastF: trkFrame, miss: 0, q, last: q, l: q.l, conf: false };
+    q.tid = t.id; TRK.push(t);
+  });
+  for (const t of TRK) if (t.nh >= 3 && t.lastF - t.firstF > span) t.conf = true;
+  TRK = TRK.filter(t => t.miss <= 4);
+  for (const q of kept) { const t = TRK.find(x => x.id === q.tid); q.tconf = !!(t && t.conf); q.tv = t ? t.v : null; }
+  const shown = [];
+  for (const t of TRK) if (t.conf) {
+    if (t.q) shown.push(t.q);
+    else shown.push(Object.assign({}, t.last, { r: t.r, l: t.l - 2 * t.miss, coast: t.miss, tid: t.id, tconf: true }));
+  }
+  return shown;
+}
+
 // ---------- time zero locked to the click loop ----------
 // Playback and recording share one clock, so the direct sound sits at a fixed position modulo PERIOD in absolute
 // recorded-sample time. Re-picking it every reading (argmax) can flip by one sample when the true peak is near half a
@@ -718,13 +768,17 @@ function frame(binM, binS, t0) {
         q.dir = quietDir ? '?' : q.lagOK ? classify(q.cos) : 'side';
       }
       const mnClicks = UD ? 0 : echoMotion(mnCs, kept, nb);   // approach speed per echo (logged; not displayed yet)
+      // radar and distance readout use CONFIRMED tracks (raw detections go to the Map, the distance graph and the log)
+      const shown = trackEchoes(kept, performance.now(), UD ? 1 : clickJ);
       const prof = new Float32Array(tp.prof.length);
-      for (const q of kept) {
+      const best = kept.length ? Math.max(...kept.map(q => q.l)) : (shown.length ? Math.max(...shown.map(q => q.l)) : 0);
+      for (const q of shown) {
         // Full: confirmed-ahead bright, unsure (side) and behind dimmed. Clean: confirmed-ahead only.
         const f = q.dir === 'ahead' || q.dir === '?' ? 1 : $('dirf').value === 'clean' ? 0 : q.dir === 'side' ? 0.4 : 0.25;
-        for (let dd = -1; dd <= 1; dd++) { const i = q.b + dd; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], f * tp.prof[i]); }
+        const v = Math.min(1, Math.max(0.25, (q.l - (best - 24)) / 24)), b = Math.floor(q.r / binM);
+        for (let dd = -1; dd <= 1; dd++) { const i = b + dd; if (i >= 0 && i < prof.length) prof[i] = Math.max(prof[i], f * (dd ? 0.5 * v : v)); }
       }
-      const front = kept.filter(q => q.dir === 'ahead' || q.dir === '?');   // distance readout: confirmed-ahead (or, in Quiet, any) echoes
+      const front = shown.filter(q => q.dir === 'ahead' || q.dir === '?');   // distance readout: confirmed-ahead (or, in Quiet, any) tracks
       // log every picked echo (saved to the phone when the sonar stops) for tuning
       const g = o.g || [0, 0, 9.8], gn = Math.hypot(g[0], g[1], g[2]) || 9.8;
       sonarLog.push({ t: Math.round(performance.now()), seg, bg: bgReady ? 1 : 0, h: Math.round(theta), yaw: +yawUse.toFixed(1), dl: +directLag.toFixed(1),
@@ -732,11 +786,14 @@ function frame(binM, binS, t0) {
         gy: +gyroMax(PERIOD / SR * 1000 * (avg + 1)).toFixed(2), tilt: [+(Math.asin(Math.max(-1, Math.min(1, g[1] / gn))) * 180 / Math.PI).toFixed(0),
         +(Math.asin(Math.max(-1, Math.min(1, g[0] / gn))) * 180 / Math.PI).toFixed(0)], ms: Math.round(performance.now() - t0),
         e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
-          q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null]), mn: mnClicks });
+          q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null,
+          q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1)]), mn: mnClicks,
+        nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]) });
       if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
       const mapMode = $('dirf').value === 'map';
+      // Map: all detections (it accumulates evidence over time itself -- random junk doesn't build up, faint real walls do)
       if (mapMode) { updateMap(theta, kept, mk, mR); renderMap(mR); } else paint(theta, prof, binM, mR, mk);
       drawAscan(lev, kept, binM, mR, mk, lastThr);
       drawFrame(theta, mR);
@@ -783,7 +840,7 @@ async function start(keep) {
   }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
-  running = true; lastFrames = -1; staleSince = 0; MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map();
+  running = true; lastFrames = -1; staleSince = 0; MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map(); resetTracks();
   if (!keep) { yaw0 = null; nearHist = []; clearAcc(); clearMap(); seg++; }
   logEv(keep ? 'restart' : 'start', { settings: curSettings(), period: PERIOD, sweepLen: PING.I.length, loopLen });
   const gen = ++loopGen;          // any older loop sees a different generation and exits
@@ -799,7 +856,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
@@ -816,7 +873,7 @@ function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textCo
 function stopByUser() { logEv('stop', { by: 'user' }); stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
 window.onSonarStopped = why => { if (running) logEv('stop', { by: 'system', why: why || 'app paused / left' }); running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start(false);
-$('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
+$('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); resetTracks(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };

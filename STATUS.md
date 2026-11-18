@@ -440,3 +440,15 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   sweep 15/s) 12 → 5 of 36 (mostly 'lost'; walking needs another method). Not changed: at 2 clicks/s there is one click per
   reading (no speeds); restarts don't start a new segment (split analysis on 'restart' events).
 - Later: compare against open-source projects (LLAP Android code; pyroomacoustics for simulated rooms).
+- **Hand/desk test of near-zone removal (22:29, 12.6 s, Quiet 15/s, hide 0.15 m):** no constant near junk 0.2–0.8 m
+  (previous logs always had ~0.34 m body/hand and often ~0.85 m); real objects at ~0.97 m and 1.4–1.75 m kept; a few
+  0.16–0.20 m hits (hand very close, or a residue at the direct-sound edge) — inconclusive. Default "hide closer than"
+  left at 0.5 m pending a deliberate hand check (proposal: 0.3 m).
+- **Echo tracking (2026-11-17):** tracks with id, alpha-beta distance + speed (phase speed when reliable), gate 6 cm +
+  expected movement, nearest-first assignment. Confirmation = ≥ 3 hits spread over more than J+1 readings (readings
+  overlap by J clicks, so a one-off junk click appears in exactly J back-to-back readings); coast up to 4 missed
+  readings (faded). Radar + distance readout use confirmed tracks; the Map, distance graph and log keep all detections
+  (the Map is its own temporal filter). Log per echo: track id, confirmed, track speed; per frame nt, co.
+  Simulation (two walls, one moving 15 cm/s, junk echo in 40% of clicks, 10% wall dropouts): junk shown per frame
+  Strong 0.63 → 0, Full sweep 0.94 → 0.13; walls 52/52 kept; Quiet (faint, detected in only 30–50% of readings in this
+  simulation) keeps ~60–75% of wall frames — a first "seen 3 of 5" rule had hidden them completely (rejected).
