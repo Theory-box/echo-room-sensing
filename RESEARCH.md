@@ -205,3 +205,16 @@ echo-clicks): confirmed 0.40, unconfirmed 0.41, from found walls 0.40 (medians);
 0.45 / 0.38. No separation: at λ 1.8 cm, ~1 mm of hand tremor already turns the round-trip phase by ~40°, so every echo
 looks equally "impure" handheld. Might work at Strong's longer wavelengths or with the phone resting on something.
 Script: analysis/purity_coherence.py.
+
+## Fixing the pilots' motion smearing — offline tests on the 25 cm calibration and the push run (2026-11-18)
+- **Doppler correction (range–Doppler style speed search per 43 ms window):** a comb of evenly spaced tones shifted by
+  one tone spacing (23.4 Hz = 21 cm/s of motion at 19 kHz) lands back on itself → speed is only known modulo ~21 cm/s.
+  Without removing the static (direct) sound first, the search picks 18–34 cm/s while the phone rests (leakage of the
+  40 dB stronger direct sound). With the repeating static part removed (synchronous running average per position in
+  the 2048-sample cycle) and a ±10 cm/s search: speeds at rest scatter ±7–8 cm/s with a +1.5 cm/s bias, so the
+  integrated "15.6 cm" of the 25 cm move is mostly bias; push run vs sensor: corr 0.52 (pilot tracker 0.69–0.71).
+  One window resolves speed only in ~21 cm/s steps → too noisy. Not pursued.
+- **Sensor-assisted (motion sensor picks the 21 cm/s "lane"):** fails because the sensor's velocity (leaky
+  integration) loses slow steady moves (+2.5 cm for the 25 cm move). Not pursued.
+- Untestable on existing data (needs a new signal): shorter repeat (128 tones, 21 ms windows: halves the smearing,
+  echoes beyond 3.7 m wrap), separate hum band (proven physics: hum reads 82–93 % at any speed in sim), second speaker.
