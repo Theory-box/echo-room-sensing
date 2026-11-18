@@ -323,3 +323,12 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   the distance readout uses all echoes, "Clean (ahead only)" isn't offered, the mic check isn't shown, and the Map uses
   the beam + turning only. Strong/Mid keep the checked timing. Implication for the third mic: in Quiet use its loudness
   (body shadow), not timing.
+
+## 20. Full-sweep test mode (2026-11-17) — built, untested on the phone
+- Ping "Full sweep 2–22 kHz (audible, test)": one long linear sweep (half the click period, 10% edge ramps). Distance
+  from the whole band (~20 kHz → ~0.9 cm resolution vs ~2.9 cm for Quiet); two-mic timing from the sweep's 2–8 kHz part
+  (same start sample, so same indices) where wavelengths are 4–17 cm. Adaptive sensitivity like Quiet.
+- Echoes are separated from the still-playing sweep by the matched filter (pulse compression), as Quiet (long) already
+  does, so a long sweep is fine.
+- Synthetic check (wall 2 m ahead at +15 samples, 3 m behind at −15): distances 1.99/3.01 m, lags ±14.7, labels a/b.
+  Open question for the phone: whether the low-band timing is consistent between clicks (Quiet's wasn't).

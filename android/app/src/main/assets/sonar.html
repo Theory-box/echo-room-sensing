@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -76,8 +76,13 @@ const PINGS = {
   // experiment: same band, but the sweep fills half of each click period (more energy -> more faint echoes);
   // built in start() because its length depends on the click rate
   quietlong: { sig: null, amp: 0.9, fill: 0.5 },
+  // test: one long sweep over everything the speaker/mics do (2-22 kHz). Distance from the whole band (~3x sharper
+  // than Quiet's 6 kHz); two-mic timing from its 2-8 kHz part only (longer wavelengths -> the mics agree better).
+  // Gentle 10% edge ramps instead of Hann, so the low start of the sweep isn't faded out.
+  wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
 };
 let PING = PINGS.strong.sig;
+let PING_LOW = null;   // low-band part of the sweep (start of it) for the two-mic timing, or null = use the whole ping
 let AVG = 3;     // consecutive clicks averaged before matched filtering (fewer when clicking slowly)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function f32ToB64(f) {
@@ -270,7 +275,7 @@ function toProfile(raw, peak, binM, binS, mask, noise, thr) {
   // "Adaptive (all)": adaptive for every ping (experimental for Strong/Mid). Adaptive = this click's typical echo
   // level + 7 dB. Fixed Low/Med/High keep the Strong-tuned levels; for Quiet modes they're applied relative to the
   // typical level (+9/+7/+5 dB).
-  const quietPing = /^quiet/.test($('ping').value);
+  const quietPing = adaptivePing();
   if (thr === 'auto' && !quietPing) thr = -38;
   const auto = thr === 'auto' || thr === 'adaptive';
   if (auto || quietPing) {
@@ -327,8 +332,9 @@ function drawAscan(lev, kept, binM, maxR, mask, thr) {
 // = ~19.9 samples at 48 kHz. Holding the bottom edge forward: an echo from straight ahead reaches the bottom mic
 // first (lag ~ +20), from the side about equal (~0), from behind the back mic first (~ -20). Left/right can't be told.
 const MIC_LAG = 19.9;
-function envOf(x) {
-  const ci = xcorr(x, PING.I), cq = xcorr(x, PING.Q), env = new Float64Array(x.length);
+const adaptivePing = () => /^quiet|^wide/.test($('ping').value);
+function envOf(x, tpl = PING) {
+  const ci = xcorr(x, tpl.I), cq = xcorr(x, tpl.Q), env = new Float64Array(x.length);
   for (let i = 0; i < x.length; i++) env[i] = Math.hypot(ci[i], cq[i]);
   return env;
 }
@@ -402,11 +408,16 @@ function frame(binM, binS, t0) {
       const { lev, kept } = tp;
       // self-check: the click itself comes from the bottom edge, so its direct sound must show as "ahead" (lag > 0)
       const directLag = micLag(env, env2, d, 10, 26).lag;
-      const quietDir = /^quiet/.test($('ping').value);   // full window around the click (not one-sided)
+      const quietDir = /^quiet/.test($('ping').value);
+      // envelopes used for the two-mic timing: the low part of the sweep if the ping has one (same start sample,
+      // so the same indices), otherwise the full ones
+      let tA = raw, tB = raw2;
+      if (PING_LOW) { tA = envOf(x, PING_LOW).subarray(d, d + raw.length); tB = envOf(x2, PING_LOW).subarray(d, d + raw.length); }
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
-        const ml = micLag(raw, raw2, i0);
+        let j0 = i0; for (let i = Math.max(0, i0 - 6); i < Math.min(tA.length, i0 + 7); i++) if (tA[i] > tA[j0]) j0 = i;
+        const ml = micLag(tA, tB, j0);
         q.lag = ml.lag; q.match = ml.amb ? 0 : ml.q;   // ambiguous -> no usable match
         q.cos = Math.max(-1, Math.min(1, q.lag / MIC_LAG));
         let p2 = 0; for (let i = Math.max(0, i0 - 26); i < Math.min(raw2.length, i0 + 27); i++) p2 = Math.max(p2, raw2[i]);
@@ -454,7 +465,11 @@ async function start(keep) {
   PERIOD = Math.round(SR / rate);
   // long sweep: half the period, but leave room for the whole range + a noise stretch (fast clicks / 7 m range)
   const needNb = Math.round(2 * +$('range').value / C * SR);
-  PING = P.fill ? linChirp(SR, 16000, 22000, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), 'hann') : P.sig;
+  const f0 = P.f0 || 16000, f1 = P.f1 || 22000;
+  PING = P.fill ? linChirp(SR, f0, f1, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), P.taper || 'hann') : P.sig;
+  // low band = the first part of the linear sweep (frequency rises linearly from f0 to f1)
+  if (P.lowTo) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
+  else PING_LOW = null;
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   const play = new Float32Array(PING.I.length);    // so volume changes sensitivity, not distances or brightness
@@ -487,7 +502,7 @@ window.onSonarStopped = why => { running = false; loopGen++; try { Native.sonarS
 $('go').onclick = () => running ? stopByUser() : start(false);
 $('clear').onclick = () => { clearAcc(); clearMap(); yaw0 = null; };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
-$('range').onchange = () => { clearAcc(); if (running && $('ping').value === 'quietlong') { stop(); start(true); } };   // sweep length depends on range
+$('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
 function showViewHelp() { $('howmap').style.display = $('dirf').value === 'map' ? '' : 'none'; }
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
@@ -516,7 +531,7 @@ function buildView(keep) {
     : 'distance graph: white = ahead, grey = to the side (left/right/up/down), red = behind; dashed line = sensitivity';
 }
 function buildSens(keep) {
-  const quiet = /^quiet/.test($('ping').value), sel = $('sens');
+  const quiet = adaptivePing(), sel = $('sens');
   const opts = quiet ? [['auto', 'Auto'], ['-34', 'Low'], ['-38', 'Medium'], ['-42', 'High']]
                      : [['-38', 'Medium'], ['-34', 'Low'], ['-42', 'High'], ['adaptive', 'Adaptive (test)']];
   sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
