@@ -382,3 +382,12 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   every setting change, stalls, errors, eq) with wall-clock times; every frame carries seg (new at each Start and Clear —
   analyse within a segment only), raw yaw, direct-sound level (drift = speaker protection?), noise, threshold, gyro rate,
   tilt (pitch/roll from gravity), processing ms. Long sessions are saved in parts (nothing dropped).
+- **Micronavigation step 1 (2026-11-17): per-echo approach speed — logged only.** For each echo, the separate clicks
+  inside one reading (2–4) are matched-filtered individually (bottom mic); per click the envelope peak (tracked click to
+  click) gives a coarse delay and the phase at the peak the fine one (one carrier period = SR/fc samples; fc 19 kHz
+  Quiet, 7 kHz Strong, 12 kHz Mid, 5 kHz = low part of Full sweep); coarse picks the whole periods. Log adds per echo
+  [speed cm/s (+ = closer), consistency, source p = phase / e = envelope fallback / x = lost]. Simulated moving wall:
+  correct within ~1–5% from 2 to 30 cm/s in every mode, still wall 0; at 60 cm/s (walking) it loses track and says so
+  (the folded reading smears; walking needs unfolded tracking later). Not yet used for display or the map.
+- Holding the phone: not learned (user decision). Rule of thumb: hold it in front with a relaxed arm; side holds blur
+  walls ~10–20% at 2–4 m. Revisit only if micronavigation shows a big gain from knowing the hold.

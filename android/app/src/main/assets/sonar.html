@@ -70,12 +70,12 @@ let PERIOD = 3200;                                        // samples between cli
 // Ping options. "Strong" uses the band the phone speaker handles well (audible ticks); "Quiet" is near-ultrasonic
 // but the speaker is weak there, so far fewer echoes clear the noise.
 const PINGS = {
-  strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9 },
-  mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9 },   // louder than ultrasonic, narrower beam than strong
+  strong: { sig: linChirp(SR, 2000, 12000, 0.015, 'hann'), amp: 0.9, fc: 7000 },
+  mid:    { sig: linChirp(SR, 8000, 16000, 0.015, 'hann'), amp: 0.9, fc: 12000 },   // louder than ultrasonic, narrower beam than strong
   quiet:  { sig: linChirp(SR, 16000, 22000, 0.012, 'hann'), amp: 0.9 },
   // experiment: same band, but the sweep fills half of each click period (more energy -> more faint echoes);
   // built in start() because its length depends on the click rate
-  quietlong: { sig: null, amp: 0.9, fill: 0.5 },
+  quietlong: { sig: null, amp: 0.9, fill: 0.5, fc: 19000 },
   // test: one long sweep over everything the speaker/mics do (2-22 kHz). Distance from the whole band (~3x sharper
   // than Quiet's 6 kHz); two-mic timing from its 2-8 kHz part only (longer wavelengths -> the mics agree better).
   // Gentle 10% edge ramps instead of Hann, so the low start of the sweep isn't faded out.
@@ -376,6 +376,62 @@ function micLag(e1, e2, c, half = 18, maxLag = 26) {
 }
 function classify(cosA) { return cosA > 0.5 ? 'ahead' : cosA < -0.3 ? 'behind' : 'side'; }
 
+// ---------- micronavigation, step 1: approach speed of each echo from click-to-click phase ----------
+// Each reading holds several separate clicks. For one echo, the matched-filter output of each click (bottom mic) at a
+// FIXED delay rotates in phase as the distance to that reflector changes: +2*pi per (c / 2 fc) metres. Coarse range
+// change comes from the envelope peak (parabolic, ~1 mm); the phase refines it and the coarse value picks the 2*pi turn.
+// Result per echo: q.v (m/s, + = getting closer) and q.vq (0..1, how consistent the phase steps were).
+// Uses the low part of the Full sweep (2-8 kHz, fc 5 kHz: one phase turn = 3.4 cm) or the whole ping otherwise.
+let MN_TPL = null, MN_FC = 0;
+function clickC(xr, start, len, tpl) {     // complex matched-filter output of ONE click on mic 1, delays 0..len-1
+  const n = len + tpl.I.length, seg = new Float32Array(n);
+  for (let i = 0; i < n; i++) seg[i] = xr[2 * (start + i)] || 0;
+  return { re: xcorr(seg, tpl.I), im: xcorr(seg, tpl.Q) };
+}
+function echoMotion(xr, L, d, kept, nb) {
+  if (!MN_TPL || !kept.length) return 0;
+  const T = MN_TPL.I.length, J = Math.floor((L - d - nb - T) / PERIOD) + 1;   // complete clicks in this reading
+  if (J < 2) return J;
+  const cs = []; for (let j = 0; j < J; j++) cs.push(clickC(xr, d + j * PERIOD, nb, MN_TPL));
+  const dt = PERIOD / SR;
+  // per click: integer envelope peak k0 near the echo, and the phase there. At the peak the phase only reflects the
+  // fractional part of the delay (one carrier period = SR/fc samples per 2*pi), so tau_j = k0 + MN_SIGN*phase*Pc/(2*pi)
+  // up to whole carrier periods; the parabolic envelope peak (coarse) picks the right period for each step.
+  const Pc = SR / MN_FC;
+  for (const q of kept) {
+    const i = q.i0; if (i == null || i < 10 || i > nb - 11) continue;
+    const coarse = [], fine = [];
+    let prev = null;
+    for (const c of cs) {
+      const m = k => (k < 0 || k >= nb) ? 0 : Math.hypot(c.re[k], c.im[k]);
+      // first click: wide search around the folded echo position; later clicks: follow the previous click's peak
+      const c0 = prev === null ? i : prev, w = prev === null ? 4 * J + 4 : 8;
+      let k0 = c0; for (let k = c0 - w; k <= c0 + w; k++) if (m(k) > m(k0)) k0 = k;
+      prev = k0;
+      const y0 = m(k0 - 1), y1 = m(k0), y2 = m(k0 + 1), den = y0 - 2 * y1 + y2;
+      coarse.push(k0 + (den < 0 ? 0.5 * (y0 - y2) / den : 0));
+      fine.push(k0 + MN_SIGN * Math.atan2(c.im[k0], c.re[k0]) / (2 * Math.PI) * Pc);
+    }
+    const steps = [], csteps = [];
+    for (let j = 1; j < J; j++) {
+      const cst = coarse[j] - coarse[j - 1];
+      let st = fine[j] - fine[j - 1];
+      st += Pc * Math.round((cst - st) / Pc);   // whole carrier periods from the envelope
+      steps.push(st); csteps.push(cst);
+    }
+    const stat = a => { const mu = a.reduce((x, y) => x + y, 0) / a.length; return [mu, Math.sqrt(a.reduce((x, y) => x + (y - mu) * (y - mu), 0) / a.length)]; };
+    const [mean, sd] = stat(steps), [cmean, csd] = stat(csteps);
+    const toV = st => -(st * C / (2 * SR)) / dt;        // samples of round-trip delay per click -> m/s, + = closer
+    const fq = Math.max(0, 1 - sd / (Pc / 4));          // fine (phase) consistency
+    const cq = Math.max(0, 1 - csd / 2);                // coarse (envelope) consistency: spread of 2 samples -> 0
+    if (fq >= 0.5) { q.v = toV(mean); q.vq = fq; q.vsrc = 'p'; }        // phase: ~0.1 mm per click
+    else if (cq >= 0.3) { q.v = toV(cmean); q.vq = 0.5 * cq; q.vsrc = 'e'; }   // envelope only: ~1 mm per click
+    else { q.v = null; q.vq = 0; q.vsrc = 'x'; }   // lost track (e.g. > ~30-50 cm/s while clicks are folded): no estimate
+  }
+  return J;
+}
+let MN_SIGN = 1;   // phase-vs-delay sign convention (set by the self-test in the simulation; 1 = phase grows with delay)
+
 // ---------- full sweep: shaped sweeps (speaker equalizer) and up/down alternation ----------
 const EQ_EDGES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000, 22000];
 let EQW = null, eqFrames = 0, eqPending = false;   // per-band time weights (null = flat sweep while measuring)
@@ -498,6 +554,7 @@ function frame(binM, binS, t0) {
       for (const q of kept) {
         const c0 = Math.round((q.b + 0.5) * binS);
         let i0 = c0; for (let i = Math.max(0, c0 - Math.ceil(binS)); i < Math.min(raw.length, c0 + Math.ceil(binS)); i++) if (raw[i] > raw[i0]) i0 = i;
+        q.i0 = i0;
         let j0 = i0; for (let i = Math.max(0, i0 - 6); i < Math.min(tA.length, i0 + 7); i++) if (tA[i] > tA[j0]) j0 = i;
         const ml = micLag(tA, tB, j0);
         q.lag = ml.lag; q.match = ml.amb ? 0 : ml.q;   // ambiguous -> no usable match
@@ -512,6 +569,7 @@ function frame(binM, binS, t0) {
         q.lagOK = !quietDir && q.heard2 >= 3.2 && Math.abs(q.lag) <= MIC_LAG + 2 && q.match >= 0.6;
         q.dir = quietDir ? '?' : q.lagOK ? classify(q.cos) : 'side';
       }
+      const mnClicks = UD ? 0 : echoMotion(xr, L, d, kept, nb);   // approach speed per echo (logged; not displayed yet)
       const prof = new Float32Array(tp.prof.length);
       for (const q of kept) {
         // Full: confirmed-ahead bright, unsure (side) and behind dimmed. Clean: confirmed-ahead only.
@@ -525,7 +583,8 @@ function frame(binM, binS, t0) {
         avg, pk: +(20 * Math.log10(peak + 1e-12)).toFixed(1), nz: +(20 * Math.log10(noise)).toFixed(1), thr: +lastThr.toFixed(1),
         gy: +gyroMax(PERIOD / SR * 1000 * (avg + 1)).toFixed(2), tilt: [+(Math.asin(Math.max(-1, Math.min(1, g[1] / gn))) * 180 / Math.PI).toFixed(0),
         +(Math.asin(Math.max(-1, Math.min(1, g[0] / gn))) * 180 / Math.PI).toFixed(0)], ms: Math.round(performance.now() - t0),
-        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2)]) });
+        e: kept.map(q => [+q.r.toFixed(2), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
+          q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null]), mn: mnClicks });
       if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       const near = front.length ? Math.min(...front.map(q => q.r)) : null;
       const mR = +$('range').value, mk = +$('mask').value;
@@ -556,6 +615,7 @@ async function start(keep) {
   // low band = the first part of the linear sweep (frequency rises linearly from f0 to f1)
   if (P.lowTo && !P.updown) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
   else PING_LOW = null;
+  MN_TPL = P.lowTo ? PING_LOW : PING; MN_FC = P.lowTo ? (f0 + P.lowTo) / 2 : (P.fc || (f0 + f1) / 2);
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
@@ -590,7 +650,7 @@ function saveLog(partial) {
     Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p/e]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
   } catch (e) { }
   sonarLog = []; sonarEvents = []; logPart = partial ? logPart + 1 : 0;
