@@ -779,3 +779,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   result ends with the channel count; the start event logs micsRecorded). For offline study: low-band two-mic timing,
   the third mic as a close pair with the back mic, floor-vs-wall by loudness. Sim: existing modes unchanged; the test
   mode can't be judged by the harness (fixed 15/s vs the harness's rates).
+- **Build "room box" (2026-11-18): Map view setting "Room box: Off / On (test)".** Collects confirmed echoes (heading,
+  distance) since Start/Clear (last 6000), refits a 4-wall box about once a second after ≥ 200 echoes (per rotation
+  1° steps, each wall's distance = the 1 cm bin with most facing echoes within ±4 cm; 11 ms on 843 echoes), draws it:
+  solid yellow wall = support > 2× the clutter level, red dashed otherwise; distances and box size on the map; logged
+  per fit as `rb`. On the 14:05 sweep the app's fit (0.84 / 1.53 / 1.52 / 1.31 m) differs from the offline one
+  (0.98 / 1.53 / 1.81 / 1.31) on two walls whose top candidates had nearly equal support → the box can flip between close
+  candidates. Not yet tried live.

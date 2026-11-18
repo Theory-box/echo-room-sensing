@@ -47,7 +47,8 @@
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
-    <label id="wallsrow" style="display:none">Walls <select id="walls"><option value="line" selected>Straighten</option><option value="arc">As heard (arcs)</option></select></label>
+    <label id="wallsrow" style="display:none">Walls <select id="walls"><option value="line" selected>Straighten</option><option value="arc">As heard (arcs)</option></select>
+      &nbsp;Room box <select id="roombox"><option value="off" selected>Off</option><option value="on">On (test)</option></select></label>
   </div>
   <div class="row">
     <label>Sensitivity <select id="sens"></select></label>
@@ -62,7 +63,9 @@
     clear up as you turn. Smooth walls show mostly where they are nearest to you. Clear starts a new map.
     <b>Walls: Straighten</b> draws a straight line (yellow) where an echo kept the same distance while you turned past it:
     that's a flat wall facing you squarely at the middle of the turn. Lines appear after you turn past a wall; the
-    line's length is a guess, its distance and direction are measured. A corner can also make a line.</p>
+    line's length is a guess, its distance and direction are measured. A corner can also make a line.
+    <b>Room box (test)</b> fits the simplest room that explains all the echoes so far: four walls at right angles.
+    Solid yellow = many echoes back that wall; red dashed = few (a guess, or no wall there). Needs ~15 s of turning.</p>
   <div id="status" class="mut"></div>
   </div>
 </div>
@@ -479,7 +482,55 @@ function ghostOf(w) {
 }
 const wallHidden = w => isRing(w.r) || floorLike(w.r) || ghostOf(w);
 let RUNS = [], WALLS = [], rcdDone = [], UH = 0, UHlast = null, runNext = 1, UHlo = 0, UHhi = 0;
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; }
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], last: 0, fit: null }; }
+// ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
+// A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
+// D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
+// the most facing echoes agree on (+-RB_TOL); the rotation with the most agreeing echoes wins. Per-wall support is
+// compared with what random clutter would give, so walls without echoes show as weak (dashed) instead of being invented.
+// Offline on 11 same-spot sweeps: 8 consistent rooms (~2.7 x 2.9 m); sim: exact box, missing wall -> clutter-level support.
+const RB_TOL = 0.04, RB_FACE = 30, RB_MIN = 0.35, RB_MAX = 5.0, RB_N = 6000;
+let RBOX = { h: [], r: [], last: 0, fit: null };
+function roomFit() {
+  const h = RBOX.h, r = RBOX.r, n = h.length, nb = Math.round((RB_MAX - RB_MIN) / 0.01), win = Math.round(RB_TOL / 0.01);
+  let best = null;
+  for (let rot = -45; rot < 45; rot++) {
+    const D = [], votes = []; let tot = 0;
+    for (let w = 0; w < 4; w++) {
+      const nrm = rot + 90 * w, hist = new Int32Array(nb);
+      for (let i = 0; i < n; i++) {
+        const off = angDiff(h[i], nrm); if (Math.abs(off) >= RB_FACE) continue;
+        const b = Math.round((r[i] + ARM * Math.cos(off * Math.PI / 180) - RB_MIN) / 0.01); if (b >= 0 && b < nb) hist[b]++;
+      }
+      let run = 0, bi = 0, bv = -1;   // count within +-win bins of each bin (sliding window)
+      for (let b = 0; b < nb + win; b++) {
+        if (b < nb) run += hist[b]; if (b - 2 * win - 1 >= 0) run -= hist[b - 2 * win - 1];
+        const c = b - win; if (c >= 0 && c < nb && run > bv) { bv = run; bi = c; }
+      }
+      D.push(RB_MIN + bi * 0.01); votes.push(bv); tot += bv;
+    }
+    if (!best || tot > best.tot) best = { rot, D, votes, tot };
+  }
+  best.clutter = Math.round(n * 0.08 / 4); best.n = n;
+  return best;
+}
+function drawRoomBox(maxR) {
+  const f = RBOX.fit; if (!f) return;
+  const sc = RPX / maxR, L = [0, 1, 2, 3].map(w => { const a = (f.rot + 90 * w) * Math.PI / 180; return [Math.sin(a), Math.cos(a), f.D[w]]; });
+  const corner = (i, j) => { const [ax, ay, ad] = L[i], [bx, by, bd] = L[j], det = ax * by - ay * bx; return [(ad * by - ay * bd) / det, (ax * bd - ad * bx) / det]; };
+  for (let w = 0; w < 4; w++) {
+    const c1 = corner((w + 3) % 4, w), c2 = corner(w, (w + 1) % 4), strong = f.votes[w] > 2 * f.clutter;
+    actx.save(); actx.strokeStyle = strong ? 'rgba(240,200,60,0.95)' : 'rgba(220,80,60,0.85)'; actx.lineWidth = strong ? 4 : 2;
+    if (!strong) actx.setLineDash([8, 6]);
+    actx.beginPath(); actx.moveTo(CX + c1[0] * sc, CY - c1[1] * sc); actx.lineTo(CX + c2[0] * sc, CY - c2[1] * sc); actx.stroke(); actx.restore();
+    const mx = (c1[0] + c2[0]) / 2, my = (c1[1] + c2[1]) / 2;
+    actx.fillStyle = 'rgba(255,255,255,0.85)'; actx.font = '12px sans-serif'; actx.textAlign = 'center';
+    actx.fillText(f.D[w].toFixed(2) + ' m', CX + mx * 1.12 * sc, CY - my * 1.12 * sc);
+  }
+  const w1 = f.D[0] + f.D[2], w2 = f.D[1] + f.D[3];
+  actx.fillStyle = 'rgba(240,200,60,0.95)'; actx.font = '13px sans-serif'; actx.textAlign = 'left';
+  actx.fillText(`room box ${Math.min(w1, w2).toFixed(2)} x ${Math.max(w1, w2).toFixed(2)} m`, 8, W - 10);
+}
 function wallOf(u) {
   const span = u.hi - u.lo;
   let lm = -Infinity; for (const x of u.s) lm = Math.max(lm, x[2]);
@@ -577,6 +628,7 @@ function renderMap(maxR) {
   actx.drawImage(mapCv, CX - sz, CY - sz, 2 * sz, 2 * sz);
   actx.globalAlpha = 1;
   if (straight) drawWalls(maxR);
+  if ($('roombox').value === 'on') drawRoomBox(maxR);
 }
 
 // ---------- processing ----------
@@ -584,10 +636,10 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 three mics';
+const APP_BUILD = '2026-11-18 room box';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
-  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
+  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
 function logEv(type, extra) {
   sonarEvents.push(Object.assign({ t: Math.round(performance.now()), wall: new Date().toISOString(), type, seg, running }, extra || {}));
 }
@@ -1341,9 +1393,17 @@ function frame(binM, binS, t0) {
       const mapMode = $('dirf').value === 'map';
       // Map: all detections (it accumulates evidence over time itself -- random junk doesn't build up, faint real walls do)
       if (mapMode) {
-        updateMap(theta, kept, mk, mR); updateWalls(theta, kept, t0); renderMap(mR);
+        updateMap(theta, kept, mk, mR); updateWalls(theta, kept, t0);
+        let rbNew = false;
+        if ($('roombox').value === 'on') {
+          for (const q of kept) if (q.tconf && q.r > RB_MIN) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); }
+          if (RBOX.h.length > RB_N) { RBOX.h.splice(0, RBOX.h.length - RB_N); RBOX.r.splice(0, RBOX.r.length - RB_N); }
+          if (RBOX.h.length >= 200 && t0 - RBOX.last > 1000) { RBOX.fit = roomFit(); RBOX.last = t0; rbNew = true; }
+        }
+        renderMap(mR);
         const fl = sonarLog[sonarLog.length - 1];
-        if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; } }
+        if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; }
+          if (rbNew && RBOX.fit) fl.rb = [RBOX.fit.rot, ...RBOX.fit.D.map(v => +v.toFixed(2)), ...RBOX.fit.votes, RBOX.fit.clutter, RBOX.fit.n]; }
       } else paint(theta, prof, binM, mR, mk);
       if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       drawAscan(lev, kept, binM, mR, mk, lastThr);
@@ -1444,7 +1504,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
@@ -1470,6 +1530,7 @@ $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
 $('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('bands').onchange = () => { if (running) { stop(); start(true); } };
+$('roombox').onchange = () => { if (!running) return; RBOX = { h: [], r: [], last: 0, fit: null }; };
 
 $('vol').oninput = () => { $('volv').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { if (running) { stop(); start(true); } };
@@ -1500,7 +1561,7 @@ function buildSens(keep) {
   sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   sel.value = opts.some(o => o[0] === keep) ? keep : opts[0][0];
 }
-const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol', 'walls', 'bands'];
+const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol', 'walls', 'bands', 'roombox'];
 let savedSt = {};
 try { savedSt = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); } catch (e) { }
 for (const k of SAVED) {
