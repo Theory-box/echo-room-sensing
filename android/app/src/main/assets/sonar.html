@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option></select></label>
+    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="hum">Hum (experiment: records only)</option></select></label>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -89,10 +89,28 @@ const PINGS = {
   // it lands before it, outside the echo window); and a speaker equalizer -- cost 2-8 dB of echo strength on this
   // phone and stepped band weights raised range sidelobes. The code for both remains (flags updown / eq).
   wide: { sig: null, amp: 0.9, fill: 0.5, f0: 2000, f1: 22000, taper: 'tukey', lowTo: 8000 },
+  // EXPERIMENT (2026-11-18): steady hum of HUM_N tones, 17.0-20.75 kHz in 250 Hz steps, played continuously. Every
+  // reflection then arrives as a steady wave whose phase shifts as the phone moves (one full turn per ~9 mm of
+  // path toward a surface), measured 48000 times a second instead of once per click -- the "hologram" idea, for
+  // millimetre tracking of the phone itself. 250 Hz spacing: every tone repeats exactly every 192 samples, so each
+  // tone can be separated exactly. The radar shows nothing in this mode; it only records (raw audio + motion) for
+  // offline analysis.
+  hum: { sig: null, amp: 0.9, hum: true },
 };
 let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
 let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
+const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
+let HUM = false;
+function humLoop() {   // HUM_N tones, fixed pseudo-random phases (low peak level), peak-normalised to 1
+  const x = new Float32Array(HUM_LOOP); let seed = 12345;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const ph = Array.from({ length: HUM_N }, () => 2 * Math.PI * rnd());
+  for (let i = 0; i < HUM_LOOP; i++) { let v = 0; for (let k = 0; k < HUM_N; k++) v += Math.cos(2 * Math.PI * (HUM_F0 + HUM_DF * k) * i / SR + ph[k]); x[i] = v; }
+  let m = 0; for (const v of x) m = Math.max(m, Math.abs(v));
+  for (let i = 0; i < HUM_LOOP; i++) x[i] /= m;
+  return { x, ph };
+}
 // Pitch bands ("frequency compounding", standard in medical ultrasound): a wall returns several overlapping reflections
 // a few cm apart; at short wavelengths the slightest movement re-mixes them, so the loudest point hops ~3 cm from click
 // to click (measured 2026-11-18, Quiet). Each pitch band re-mixes them differently, so the envelope is computed per
@@ -389,7 +407,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 ghost walls';
+const APP_BUILD = '2026-11-18 hum experiment';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -948,6 +966,7 @@ async function loop(gen) {
   }
 }
 function frame(binM, binS, t0) {
+  if (HUM) { humFrame(t0); return; }
     // average fewer clicks while turning quickly (clicks at different headings shouldn't be mixed)
     const avg = gyroMax(PERIOD / SR * 1000 * (AVG + 1)) > 0.6 ? Math.min(2, AVG) : AVG;   // fewer clicks when turning fast (heading smear); >= 2 keeps the speed measurement
     const UD = !!PING_UP, np2 = Math.max(1, Math.ceil((avg + 1) / 2));      // alternating: fold whole up+down pairs
@@ -1154,6 +1173,22 @@ function frame(binM, binS, t0) {
     }
 }
 
+// Hum mode: no echo processing, just a light log every 0.1 s (heading, motion, recording position) to line up with
+// the raw recording offline.
+function humFrame(t0) {
+  const s = Native.sonarReadBoth(16), k = s.indexOf('|'), frames = +s.slice(0, k);
+  if (frames === lastFrames) return;
+  lastFrames = frames;
+  const o = JSON.parse(Native.orientation()), yh = yawAt(t0), yawUse = yh === null ? o.yaw : yh;
+  if (yaw0 === null) yaw0 = yawUse;
+  const theta = angDiff(yawUse, yaw0);
+  let tc = null; try { const ck = Native.sonarClock ? Native.sonarClock() : ''; if (ck) { const [cf, cage] = ck.split(',').map(Number); tc = Math.round(performance.now() - cage + (frames - cf) / SR * 1000); } } catch (e) { }
+  sonarLog.push({ t: Math.round(t0), seg, hum: 1, h: Math.round(theta), yaw: +yawUse.toFixed(1), gy: +gyroMax(100).toFixed(2), fr: frames, tc,
+    e: [], ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [] });
+  if (sonarLog.length >= 6000) saveLog(true);
+  drawFrame(theta, +$('range').value);
+  $('status').textContent = `Hum test: recording (${Math.round(frames / SR)} s). The last 40 s are saved when you press Stop.`;
+}
 async function start(keep) {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
   const P = PINGS[$('ping').value];
@@ -1162,7 +1197,7 @@ async function start(keep) {
   // long sweep: half the period, but leave room for the whole range + a noise stretch (fast clicks / 7 m range)
   const needNb = Math.round(2 * +$('range').value / C * SR);
   const f0 = P.f0 || 16000, f1 = P.f1 || 22000;
-  PING = P.fill ? linChirp(SR, f0, f1, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), P.taper || 'hann') : P.sig;
+  PING = P.fill ? linChirp(SR, f0, f1, Math.max(0.01, Math.min(P.fill * PERIOD, PERIOD - needNb - 300) / SR), P.taper || 'hann') : (P.sig || PINGS.quiet.sig);   // hum: placeholder (not used)
   // low band = the first part of the linear sweep (frequency rises linearly from f0 to f1)
   if (P.lowTo && !P.updown) { const nL = Math.round(PING.I.length * (P.lowTo - f0) / (f1 - f0)); PING_LOW = { I: PING.I.slice(0, nL), Q: PING.Q.slice(0, nL) }; }
   else PING_LOW = null;
@@ -1173,7 +1208,13 @@ async function start(keep) {
   const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
   if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
   let play, loopLen = PERIOD;
-  if (P.updown) {
+  HUM = !!P.hum;
+  if (HUM) {
+    PERIOD = HUM_LOOP; loopLen = HUM_LOOP; PING_UP = PING_DN = LOW_UP = LOW_DN = null;
+    const h = humLoop(); play = new Float32Array(HUM_LOOP);
+    for (let i = 0; i < HUM_LOOP; i++) play[i] = P.amp * vol * h.x[i];
+    logEv('hum', { tones: HUM_N, f0: HUM_F0, df: HUM_DF, loop: HUM_LOOP, phases: h.ph.map(v => +v.toFixed(4)) });
+  } else if (P.updown) {
     const n = Math.round(Math.max(480, Math.min(P.fill * PERIOD, PERIOD - needNb - 300)));
     const w = (P.eq && EQW) || EQ_EDGES.slice(1).map(() => 1);
     PING_UP = shapedSweep(n, EQ_EDGES, w, false, P.lowTo); PING_DN = shapedSweep(n, EQ_EDGES, w, true, P.lowTo);
@@ -1203,7 +1244,7 @@ function saveLog(partial) {
     Native.newSession();
     // last 20 s of both mics as a 32-bit float WAV (ch1 bottom, ch2 back), for checking the processing offline
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 20); } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),

@@ -625,3 +625,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   19 / 50 / 30 / 21 (was 14 / 26 / 18 / 14); drawn walls per session 6–10, mostly 0.8–2 m (was 20–29, many 2.4–4.5 m).
   Sim: walls 39 / 48 (was 43), false walls 5 (was 6) — the sim's floor reflector is far stronger than real floors and
   pieces of it occlude real walls. Installed; not yet tested on the phone.
+- **Hum ("hologram") experiment (2026-11-18).** New ping "Hum (experiment: records only)": 16 steady tones
+  17.0–20.75 kHz in 250 Hz steps (every tone repeats exactly every 192 samples), fixed pseudo-random phases, looped
+  every 0.1 s; no echo processing, a light log every 0.1 s (heading, motion, recording counter, capture time), and the
+  last 40 s of raw audio saved on Stop (ring buffer 20 → 40 s). Idea: every reflection arrives as a steady wave whose
+  phase is measured continuously (250 values/s per tone, never losing count of cycles), so the phone's movement
+  relative to each surface can be tracked to sub-mm. Closest prior work: LLAP (MobiCom'16, still phone tracking a hand,
+  3.5 mm); no prior work found for a phone tracking ITSELF against the room. Offline analysis
+  analysis/hum_hologram.py, on simulated audio: one dominant wall → path change tracked to 0.3 mm rms over 9 cm of
+  motion; with surfaces ahead + behind of similar strength, a per-distance profile (inverse FFT across tones, 4.3 cm
+  steps, repeats every 0.69 m) tracks each separately with the right sign (behind 0.09 mm, ahead 5 mm, side 8 mm).
+  Not yet tried on real audio (speckle could spoil it as it did for clicks).

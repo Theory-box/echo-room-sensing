@@ -155,8 +155,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             recOrNull = rec;
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
             synchronized (ringLock) {
-                ringCap = sr * 20;
-                tsFrame = -1;    // 20 s: the live view reads the last ~0.5 s; the rest is kept for saveSessionRaw
+                ringCap = sr * 40;   // 40 s: live view reads the last ~0.5 s; the rest is kept for saveSessionRaw (hum test: 40 s)
+                tsFrame = -1;
                 ring = new float[ringCap * 2];
                 ringFrames = 0;
             }
