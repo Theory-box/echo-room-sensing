@@ -452,3 +452,20 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   Simulation (two walls, one moving 15 cm/s, junk echo in 40% of clicks, 10% wall dropouts): junk shown per frame
   Strong 0.63 → 0, Full sweep 0.94 → 0.13; walls 52/52 kept; Quiet (faint, detected in only 30–50% of readings in this
   simulation) keeps ~60–75% of wall frames — a first "seen 3 of 5" rule had hidden them completely (rejected).
+- **Echo tracking — real tests (2026-11-17 23:44–23:48, 6 sessions, ~4.5 min, Quiet 15/8 per s + Full sweep):** radar
+  set changes per frame 0.65–0.87 (raw) → 0.12–0.19 (shown), nearest-distance jumps > 20 cm 14–24 % → 4–7 %; 25–35 %
+  of raw detections never confirmed (mostly junk; some faint real far echoes near the range edge); readout present
+  slightly less often (e.g. 90 → 86 % of frames). A 0.16 m echo (just past the 0.15 m mask) shows only in the first
+  3–7 s after Start. User: "works better than it used to".
+- **Straight walls in Map view (2026-11-18), setting "Walls: Straighten / As heard (arcs)", Map view only, all pings:**
+  regions of constant depth (Leonard & Durrant-Whyte 1991). Detections grouped by distance (not track id: faint walls'
+  tracks break up) with the arm-offset dip allowed (ARM·(1−cos)); region ends after 15° of turning (or 3 s) without
+  it; needs ≥ 5 detections (≥ 3 confirmed), span 12–150°, and its first edge must have been looked past (a wall faced
+  at Start is cut off). Direction = echo-power-weighted mean heading; D = mean(r + ARM·cos(h − mid)). Same wall again
+  (≤ 15° & 12 cm, or ≤ 30° & 6 cm) merged. Floor/ceiling hidden: map ring check, a region > 150°, or ≥ 3 regions at
+  the same distance (± 5 cm, 0.6–2.2 m) pointing into 3+ different 45° sectors. Line length is a guess (from span,
+  capped 1.2 m half-length). Log: nw per frame, rcd = ended regions. Simulation (4 walls, floor echo, junk in 40 %
+  of clicks, 20 % dropouts, 9 cases incl. 8/15 per s, Strong/Quiet/Full, turning 20–60°/s both ways): 33/36 walls
+  found, direction error median 1.8°, worst 5.6°, distance ±2 cm; span midpoint instead of power weighting was
+  3.0° / 20°. ~1 false wall per case remains (sim multipath at fixed distances). A harness bug (heading reference)
+  first looked like a 5–7° lag; it wasn't the app. Untested on the phone.

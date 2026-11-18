@@ -47,6 +47,7 @@
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
+    <label id="wallsrow" style="display:none">Walls <select id="walls"><option value="line" selected>Straighten</option><option value="arc">As heard (arcs)</option></select></label>
   </div>
   <div class="row">
     <label>Sensitivity <select id="sens"></select></label>
@@ -57,7 +58,10 @@
     Direction is rough (tens of degrees); distance is precise. You'll hear faint ticks.</p>
   <p class="mut" id="howmap" style="display:none"><b>Map view:</b> stay on one spot and turn slowly, a full circle or two. Every echo is kept;
     places that keep echoing from different headings get brighter, and places the sonar sees through fade out, so ghosts
-    clear up as you turn. Smooth walls show mostly where they are nearest to you. Clear starts a new map.</p>
+    clear up as you turn. Smooth walls show mostly where they are nearest to you. Clear starts a new map.
+    <b>Walls: Straighten</b> draws a straight line (yellow) where an echo kept the same distance while you turned past it:
+    that's a flat wall facing you squarely at the middle of the turn. Lines appear after you turn past a wall; the
+    line's length is a guess, its distance and direction are measured. A corner can also make a line.</p>
   <div id="status" class="mut"></div>
   </div>
 </div>
@@ -159,7 +163,7 @@ const RB = 0.05, NRB = Math.ceil(MEXT / RB);                         // range bi
 let mapL = new Float32Array(MN * MN), ringFrac = new Float32Array(NRB * 12), covered = 0;
 const mapCv = document.createElement('canvas'); mapCv.width = mapCv.height = MN;
 const mapCtx = mapCv.getContext('2d'), mapImg = mapCtx.createImageData(MN, MN);
-function clearMap() { mapL.fill(0); ringFrac.fill(0); covered = 0; }
+function clearMap() { mapL.fill(0); ringFrac.fill(0); covered = 0; clearWalls(); }
 const popc = v => { let c = 0; while (v) { c += v & 1; v >>= 1; } return c; };
 function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
   const i = Math.floor(x / MCELL + MN / 2), j = Math.floor(MN / 2 - y / MCELL);
@@ -167,6 +171,14 @@ function mapAdd(x, y, dv) {             // x east, y north (m) -> cell
   const k = j * MN + i; mapL[k] = Math.max(-2, Math.min(6, mapL[k] + dv));
 }
 // how loud the click is toward bearing phi (deg, 0 = where the bottom edge points): strong ahead, weak behind (body)
+// floor/ceiling: echo at this distance in most clicks, in >= 75% of the 30-degree sectors turned through
+function isRing(r) {
+  const nCov = popc(covered);
+  if (nCov < 8 || r <= 0.6 || r >= 2.2) return false;
+  const rb = Math.round(r / RB); let n = 0;
+  for (let sc = 0; sc < 12; sc++) if ((covered >> sc) & 1 && ringFrac[rb * 12 + sc] >= 0.5) n++;
+  return n >= 0.75 * nCov;
+}
 const beamW = phi => { const c = Math.cos(phi * Math.PI / 180); return c > 0 ? 0.06 + 0.94 * c ** 4 : 0.06; };
 function updateMap(theta, kept, mask, maxR) {
   const th = theta * Math.PI / 180, px = ARM * Math.sin(th), py = ARM * Math.cos(th);
@@ -176,13 +188,6 @@ function updateMap(theta, kept, mask, maxR) {
   const hit = new Uint8Array(NRB);
   for (const q of kept) { const rb = Math.round(q.r / RB); for (let d = -1; d <= 1; d++) if (rb + d >= 0 && rb + d < NRB) hit[rb + d] = 1; }
   for (let b = 0; b < NRB; b++) { const k = b * 12 + sec; ringFrac[k] += 0.25 * (hit[b] - ringFrac[k]); }
-  const nCov = popc(covered);
-  const isRing = r => {           // floor/ceiling: echo at this distance in most clicks, in >= 75% of the sectors turned through
-    if (nCov < 8 || r <= 0.6 || r >= 2.2) return false;
-    const rb = Math.round(r / RB); let n = 0;
-    for (let sc = 0; sc < 12; sc++) if ((covered >> sc) & 1 && ringFrac[rb * 12 + sc] >= 0.5) n++;
-    return n >= 0.75 * nCov;
-  };
   const best = kept.length ? Math.max(...kept.map(q => q.l)) : 0;
   let nearAhead = maxR;
   for (const q of kept) {
@@ -214,6 +219,109 @@ function updateMap(theta, kept, mask, maxR) {
     }
   }
 }
+// ---------- Map: straight walls from "regions of constant depth" (Leonard & Durrant-Whyte, 1991) ----------
+// A smooth wall reflects like a mirror: from one spot you hear it only while the phone faces it roughly squarely, and
+// over that whole span of headings its distance stays (nearly) the same. While you turn, echoes that keep one distance
+// over >= RCD_MIN degrees of turning form such a region. The phone is held ARM in front of your turning axis, so the
+// distance dips by up to ARM*(1-cos(angle off square)) in the middle (up to ~12 cm at 60 deg off): allowed for.
+// The middle heading of the span points at the wall at right angles; the wall is a straight line across that heading
+// at distance D from your turning axis, D = mean of (r + ARM*cos(heading - middle)) over the region.
+// Echoes are grouped into a region by DISTANCE, not by echo-track id: a faint wall's track breaks up as it drops out,
+// and each broken piece gave a lopsided half-region (wrong middle). A region ends when you've turned RCD_GAP degrees
+// without hearing it (or ~3 s pass). Unconfirmed detections count too (so the region starts where the echo first
+// appeared, not where tracking confirmed it -- that lag skewed directions toward the turn), but a region needs a few
+// confirmed ones to become a wall. The span comes from the beam width, not the wall, so the line's LENGTH is only a
+// guess (capped); distance and direction are what's measured. A corner also makes a region of constant depth and from
+// one spot can't be told from a wall. Regions wider than RCD_MAX are floor/ceiling (same distance everywhere).
+const RCD_TOL = 0.04, RCD_MIN = 12, RCD_MAX = 150, RCD_GAP = 15;
+// Floor/ceiling: the same distance heard all the way round. Caught three ways: the map's ring check (isRing), a region
+// that grew wider than RCD_MAX (WIDE), or -- when it keeps dropping out and so breaks into pieces -- regions at the
+// same distance (+-5 cm, within 0.6-2.2 m) pointing 3+ different ways (45-degree sectors). Real walls keep one
+// direction. (Standing exactly central in a square room would hide its walls too; rare.)
+let WIDE = [], REG = [];
+function floorLike(r) {
+  if (WIDE.some(x => Math.abs(x - r) < 0.06)) return true;
+  if (r <= 0.6 || r >= 2.2) return false;
+  const secs = new Set(REG.filter(g => Math.abs(g[0] - r) < 0.05).map(g => Math.floor((((g[1] % 360) + 360) % 360) / 45)));
+  return secs.size >= 3;
+}
+const wallHidden = w => isRing(w.r) || floorLike(w.r);
+let RUNS = [], WALLS = [], rcdDone = [], UH = 0, UHlast = null, runNext = 1, UHlo = 0, UHhi = 0;
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; }
+function wallOf(u) {
+  const span = u.hi - u.lo;
+  let lm = -Infinity; for (const x of u.s) lm = Math.max(lm, x[2]);
+  let sw = 0, sh = 0; for (const [h, , l] of u.s) { const w = Math.pow(10, (l - lm) / 10); sw += w; sh += w * h; }
+  // middle = echo-power-weighted mean heading: the echo is loudest facing the wall squarely, and the region's edges
+  // are ragged where the echo fades in and out (span midpoint: median 3.0 deg / worst 20 deg off in simulation; this:
+  // 1.9 / 6.4)
+  const mid = sh / sw, c = ((mid % 360) + 360) % 360;
+  let sD = 0; for (const [h, r] of u.s) sD += r + ARM * Math.cos((h - mid) * Math.PI / 180);
+  const D = sD / u.s.length, r = D - ARM;
+  return { a: c, D, r, span, half: Math.max(0.25, Math.min(1.2, D * Math.tan(Math.min(span, 90) / 2 * Math.PI / 180))), w: u.n, k: 1 };
+}
+// A region's first edge is only real if you had already looked past it and heard nothing there; otherwise (a wall you
+// were facing at Start, or the first turn after it) the region may be cut off on that side and its middle is wrong.
+function runOK(u) {
+  const span = u.hi - u.lo;
+  const edgeOK = (u.lo < u.h0 - 3 && u.hi > u.h0 + 3) || (u.lo >= u.h0 - 3 && u.covLo < u.h0 - 5) || (u.hi <= u.h0 + 3 && u.covHi > u.h0 + 5);
+  if (!edgeOK) return false;
+  return u.nc >= 3 && u.n >= 5 && span >= RCD_MIN && span <= RCD_MAX;
+}
+function closeRun(u, why) {
+  RUNS = RUNS.filter(x => x !== u);
+  const span = u.hi - u.lo; if (span < 3) return;           // never turned: nothing to log
+  const wl = wallOf(u), ok = runOK(u) && !wallHidden(wl);
+  if (why === 'wide') WIDE.push(wl.r); else if (span >= RCD_MIN) REG.push([wl.r, wl.a]);
+  rcdDone.push([u.id, +wl.r.toFixed(2), Math.round(wl.a), Math.round(span), u.n, ok ? 1 : 0, why[0]]);
+  if (!ok) return;
+  // same wall seen again (another turn, or a piece of it cut off by a dropout): merge, weighted by detections
+  for (const w of WALLS) {
+    const da = angDiff(wl.a, w.a);
+    if ((Math.abs(da) < 15 && Math.abs(wl.D - w.D) < 0.12) || (Math.abs(da) < 30 && Math.abs(wl.D - w.D) < 0.06)) {
+      const f = wl.w / (w.w + wl.w);
+      w.a = (((w.a + f * da) % 360) + 360) % 360; w.D += f * (wl.D - w.D); w.r = w.D - ARM;
+      w.half = Math.max(w.half, wl.half); w.w += wl.w; w.k++; w.span = Math.max(w.span, wl.span);
+      return;
+    }
+  }
+  WALLS.push(wl);
+}
+// does distance r fit region u at (unwrapped) heading h? returns how far off it is, or Infinity
+function runFit(u, r, h) {
+  const off = Math.min(60, Math.abs(h - u.hMin)), hiR = u.rMin + RCD_TOL + ARM * (1 - Math.cos(off * Math.PI / 180));
+  return r < u.rMin - RCD_TOL || r > hiR ? Infinity : Math.max(0, r - (u.rMin + ARM * (1 - Math.cos(off * Math.PI / 180))));
+}
+// kept: this reading's detections (with confirmed-track flag); theta: heading at click time; tNow: ms
+function updateWalls(theta, kept, tNow) {
+  if (UHlast !== null) UH += angDiff(theta, UHlast);
+  UHlast = theta; UHlo = Math.min(UHlo, UH); UHhi = Math.max(UHhi, UH);
+  const used = new Set();
+  for (const q of kept.filter(q => q.dir !== 'behind' && !isRing(q.r)).sort((a, b) => b.l - a.l)) {
+    let best = null, bf = Infinity;
+    for (const u of RUNS) if (!used.has(u)) { const f = runFit(u, q.r, UH); if (f < bf) { bf = f; best = u; } }
+    let u = best;
+    if (!u) { u = { id: runNext++, n: 0, nc: 0, s: [], lo: UH, hi: UH, rMin: q.r, hMin: UH, lastH: UH, lastT: tNow, h0: UH, covLo: UHlo, covHi: UHhi }; RUNS.push(u); }
+    used.add(u);
+    if (q.r < u.rMin) { u.rMin = q.r; u.hMin = UH; }
+    u.lo = Math.min(u.lo, UH); u.hi = Math.max(u.hi, UH); u.lastH = UH; u.lastT = tNow;
+    u.n++; u.s.push([UH, q.r, q.l]); if (q.tconf) u.nc++;
+    if (u.hi - u.lo > RCD_MAX) closeRun(u, 'wide');           // all the way round: floor/ceiling, not a wall
+  }
+  for (const u of [...RUNS]) if (!used.has(u) && (Math.abs(UH - u.lastH) > RCD_GAP || tNow - u.lastT > 3000)) closeRun(u, 'ended');
+}
+function drawWalls(maxR) {
+  const sc = RPX / maxR;
+  const line = (w, alpha, width) => {
+    const a = w.a * Math.PI / 180, fx = w.D * Math.sin(a), fy = w.D * Math.cos(a), tx = Math.cos(a), ty = -Math.sin(a);
+    actx.strokeStyle = `rgba(255,220,90,${alpha.toFixed(2)})`; actx.lineWidth = width;
+    actx.beginPath(); actx.moveTo(CX + (fx - w.half * tx) * sc, CY - (fy - w.half * ty) * sc);
+    actx.lineTo(CX + (fx + w.half * tx) * sc, CY - (fy + w.half * ty) * sc); actx.stroke();
+  };
+  for (const w of WALLS) if (!wallHidden(w)) line(w, Math.min(1, 0.55 + 0.15 * w.k), 5);
+  for (const u of RUNS) if (runOK(u)) { const w = wallOf(u); if (!wallHidden(w)) line(w, 0.45, 3); }   // still turning past it
+  actx.lineWidth = 1;
+}
 function renderMap(maxR) {
   const d = mapImg.data;
   for (let k = 0; k < mapL.length; k++) {
@@ -224,9 +332,12 @@ function renderMap(maxR) {
   }
   mapCtx.putImageData(mapImg, 0, 0);
   clearAcc();
-  const sz = RPX * MEXT / maxR;
+  const sz = RPX * MEXT / maxR, straight = $('walls').value === 'line';
   actx.imageSmoothingEnabled = true;
+  actx.globalAlpha = straight ? 0.4 : 1;     // Straighten: the raw map stays visible underneath, dimmed
   actx.drawImage(mapCv, CX - sz, CY - sz, 2 * sz, 2 * sz);
+  actx.globalAlpha = 1;
+  if (straight) drawWalls(maxR);
 }
 
 // ---------- processing ----------
@@ -234,10 +345,10 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-17 log v2';
+const APP_BUILD = '2026-11-18 walls';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
-  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value });
+  sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value });
 function logEv(type, extra) {
   sonarEvents.push(Object.assign({ t: Math.round(performance.now()), wall: new Date().toISOString(), type, seg, running }, extra || {}));
 }
@@ -794,7 +905,11 @@ function frame(binM, binS, t0) {
       const mR = +$('range').value, mk = +$('mask').value;
       const mapMode = $('dirf').value === 'map';
       // Map: all detections (it accumulates evidence over time itself -- random junk doesn't build up, faint real walls do)
-      if (mapMode) { updateMap(theta, kept, mk, mR); renderMap(mR); } else paint(theta, prof, binM, mR, mk);
+      if (mapMode) {
+        updateMap(theta, kept, mk, mR); updateWalls(theta, kept, t0); renderMap(mR);
+        const fl = sonarLog[sonarLog.length - 1];
+        if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; } }
+      } else paint(theta, prof, binM, mR, mk);
       drawAscan(lev, kept, binM, mR, mk, lastThr);
       drawFrame(theta, mR);
       // smooth over the last ~1.2 s (at least 3 clicks), not a fixed number of frames
@@ -856,7 +971,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s]; nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
@@ -877,7 +992,7 @@ $('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); resetTr
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
-function showViewHelp() { $('howmap').style.display = $('dirf').value === 'map' ? '' : 'none'; }
+function showViewHelp() { const m = $('dirf').value === 'map'; $('howmap').style.display = m ? '' : 'none'; $('wallsrow').style.display = m ? '' : 'none'; }
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
 $('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) { clearAcc(); showViewHelp(); } saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
@@ -910,7 +1025,7 @@ function buildSens(keep) {
   sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   sel.value = opts.some(o => o[0] === keep) ? keep : opts[0][0];
 }
-const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol'];
+const SAVED = ['range', 'rate', 'ping', 'dirf', 'sens', 'mask', 'vol', 'walls'];
 let savedSt = {};
 try { savedSt = JSON.parse(localStorage.getItem('sonarSettings2') || '{}'); } catch (e) { }
 for (const k of SAVED) {
