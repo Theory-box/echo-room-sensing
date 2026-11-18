@@ -477,3 +477,17 @@ See [RESEARCH.md](RESEARCH.md) (2024–2026 papers and ideas ranked for this app
   save moved after the Map fields are written. Not changed (nits): open regions aren't logged at Clear/Stop; merging
   takes the first matching wall; toggling Walls while stopped redraws only on the next reading. Simulation unchanged
   (33/36, median 1.8°, worst 5.6°); map cleared mid-turn: walls still correct.
+- **Wall test (2026-11-18 00:24–00:35, Quiet 15/s, one spot per segment, Clear/Stop between spots):** same wall
+  re-found on later passes within 5–8° typically (90 %: 12–15°); no turn-direction bias (opposite-turn pairs −0.5°
+  mean), no heading drift (−1.2°/min). So the misalignment is random (hold/sway, uneven beam, clutter), not timing.
+  User: "seems to work very well, especially for quiet… definitely not perfectly aligned, but decently happy".
+- **"Fewer fake echoes" (reference windowing / noise CFAR) — investigated, NOT built (2026-11-18).** Ideal range
+  sidelobes: Quiet/Strong/Mid (Hann-tapered pings) already < −48 dB beyond 10 cm; only Full sweep (10 % Tukey) has
+  −23/−40 dB sidelobes (a receive Hann window would cut them ~20 dB). Real logs (all since 23:44): unconfirmed
+  detections (likely fakes) are mostly > 1 m from any stronger echo, only ~2 dB weaker when close (sidelobes would be
+  20+ dB weaker), echo-of-echo ~1 %, and sit 14–20 dB above the measured noise floor (confirmed: 17–25) — i.e. real
+  but non-repeating reflections (clutter, reverberation, glancing surfaces), not sidelobes or noise. A noise-based
+  CFAR at 14 dB would keep 90 % of them (and 98 % of confirmed). Tracking already handles this kind on the radar.
+  Revisit only with raw profiles (CA/OS-CFAR against local reverberation) — can't be judged from current logs.
+- **Regression sim, all pings × click rates (2026-11-18):** Quiet 2/4/8/15, Strong 2/4/15, Mid 4/8/15, Full 4/8 —
+  no errors; walls 47/48 found, direction median 2.6°, worst 10.6° (Quiet 4/s); wall echo present in 59–96 % of frames.
