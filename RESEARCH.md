@@ -172,3 +172,20 @@ https://www.cs.sjtu.edu.cn/~yichao/pmwiki/assets/publications/mobisys17_strata.p
 https://unpaywall.org/10.1109%2FITSC.2013.6728341 · radar odometry survey https://arxiv.org/pdf/2307.07861 · acoustic
 sensing survey https://arxiv.org/pdf/1901.03450 · Konolige MURIEL https://unpaywall.org/10.1023%2FA%3A1008806422571 ·
 staggered PRF https://arxiv.org/pdf/2111.01246 · GCC-PHAT https://speechprocessingbook.aalto.fi/Enhancement/tdoa.html
+
+## Other fields, mapped to our measured problems (researched 2026-11-18)
+Checked on the raw wall recording (2026-11-18 11:52) where possible:
+- Leading-edge / threshold retracking (radar altimetry, Davis 1997 https://www.osti.gov/biblio/524723): jitter after
+  removing the push, 2 bands: peak 1.83 cm, −6 dB edge 1.68, −10 dB edge 1.68, −14 dB edge 1.93; 1 band: no gain.
+  Lower thresholds run into the room background (only ~6 dB below the wall hump) — the "10 %" edge stuck to the
+  search-window start (artefact). Small gain at best; not built.
+- Measured-response template / deconvolution (Kleeman & Kuc 1995 https://ecse.monash.edu/centres/irrc/LKPubs/IJRR95.PDF):
+  only helps if the 4–6 cm hump components were speaker/phone ringing. Direct-sound tail: −6 dB at 4.5 cm, −18/−22 at
+  7.5–9 cm, −29 at 10.5 cm → no ringing components at 4–6 cm; the components are in the room. Not pursued.
+- Still open, ranked: OS-CFAR (Rohling) + agreement across pitch bands for fake echoes (can be judged offline on the
+  logged raw profiles `p`); audio/IMU clock alignment with AudioRecord.getTimestamp(TIMEBASE_BOOTTIME) and gain/delay
+  calibration of the leaky integrator (explains part of 0.56× / 0.2 s early); two-mic expected-lag test (+20 vs −20
+  samples, BatMapper-style path-length check) — less needed since the body blocks echoes from behind (walls behind
+  detected 2.6 % vs 26 % ahead); bearing from echo strength vs yaw (Kuc 1997) ≈ what the wall finder's power-weighted
+  centre does. Unlikely to transfer: synthetic aperture / Doppler beam sharpening by hand at λ 1.8 cm, MVDR with 2 mics,
+  bat spectral-notch cues, full track-before-detect.
