@@ -595,3 +595,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   1.2 cm; no clear rhythm; cross-correlation 0.22 at the edge of the lag range → gain/delay not determined.
   Still part: wall echo steady to 0.2–0.3 cm. Sweep vs the 12:14 1-band sweep (same spot): step between readings
   median 0.40 vs 0.60 cm, 1-s wobble 1.26 vs 1.66 cm, walls/min 45 vs 34 — better, but a short single session.
+- **Motion calibration redone (2026-11-18).** My earlier "1–2 mm" was an analysis error: the band 0.4–2.5 Hz removed the
+  real pushes (~0.3 Hz). With 0.15–1 Hz: accelerometer-derived vs wall-echo motion correlate 0.69–0.77, scale
+  0.9–1.2×; acceleration double-integrated ≈ 4.6 cm peak-to-peak. The app's leaky-integrator velocity is the weak link
+  for slow motion (0.6×, ~0.3 s extra lead).
+- **Build "rough motion" (2026-11-18): front/back v2, logged only (e[14]).** Per confirmed echo, last 3 s: history by
+  distance (nearest detection within 4 cm per reading, following drift); fit r(t) = c0 + c1 t + c2 t² − u·x(t), x =
+  acceleration integrated twice from the window start (start velocity/offset absorbed by the line/parabola),
+  acceleration timeline 120 ms earlier than the clicks; verdict only with ≥ 3 mm forward/back movement left after the
+  parabola and |z| ≥ 2.5. On the two sessions it was tuned on (so optimistic): push test wall ahead 48 ahead / 2 behind;
+  sweep, echoes from found walls ahead 37 / 6 (old method: coin flip), other echoes 4 / 2; most echoes "unsure".
+  Replay of both logs through the app's JS reproduces it (48/1, 38/6). Needs a fresh session to confirm.

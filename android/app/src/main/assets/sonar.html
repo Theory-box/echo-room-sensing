@@ -371,7 +371,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 sensor timing';
+const APP_BUILD = '2026-11-18 rough motion';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value });
@@ -396,7 +396,73 @@ const TAU_V = 1.2;   // 0.7 s shrank (~0.9x) and advanced (~100 ms) hand motions
 let FWD_OFF = 180;
 let MO = null, VH = [];            // MO: filter state; VH: velocity history [{t, e, n}] (m/s), last ~4 s
 let MOTR = new Map();              // track id -> [{t, rho, e, n}]
-function motionReset() { MO = null; VH = []; MOTR = new Map(); }
+function motionReset() { MO = null; VH = []; MOTR = new Map(); ACCH = []; RDH = []; }
+let ACCH = [];   // raw room-frame acceleration [t page ms, east, north], last 5 s
+let RDH = [];    // per reading: { tc, r: [distances of all detections, motion correction removed] }, last RW_WIN ms
+
+// ---------- direction from rough motion (v2, built for ordinary hand movement; 2026-11-18) ----------
+// For a still reflector, its distance changes by minus the phone's movement toward it: r(t) = r0 - u . x(t), u = unit
+// vector toward the reflector (for a wall: its normal). Over the last RW_WIN ms, x(t) = the acceleration integrated
+// twice from the window start; the unknown start velocity and the sensor's slow offset just add a straight line and a
+// parabola, so the fit is r(t) = c0 + c1 t + c2 t^2 - uE xE(t) - uN xN(t) (5 unknowns, least squares). The echo's
+// history is gathered by DISTANCE (the nearest detection within RW_GATE in each earlier reading, following its drift),
+// because wall echoes keep breaking into short tracks. Fitted on the 2026-11-18 tests: acceleration timeline read
+// RW_OFF ms earlier than the clicks; a verdict needs >= RW_MOT of forward/back movement left over after the parabola
+// (otherwise there's nothing to tell and it says unsure) and |z| >= 2.5. Push test 48/2 right/wrong, sweep 37/6.
+const RW_WIN = 3000, RW_GATE = 0.04, RW_OFF = 120, RW_MOT = 0.003, RW_MIN = 20;
+function solveN(A, b) {   // small dense linear solve (Gaussian elimination, partial pivoting); A n x n, modified in place
+  const n = b.length;
+  for (let c = 0; c < n; c++) {
+    let pr = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[pr][c])) pr = r;
+    if (Math.abs(A[pr][c]) < 1e-15) return null;
+    [A[c], A[pr]] = [A[pr], A[c]]; [b[c], b[pr]] = [b[pr], b[c]];
+    for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let k = c; k < n; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) { let v = b[r]; for (let k = r + 1; k < n; k++) v -= A[r][k] * x[k]; x[r] = v / A[r][r]; }
+  return x;
+}
+function roughDir(r0, yaw) {
+  // history by distance, newest first
+  const h = []; let ref = r0;
+  for (let j = RDH.length - 1; j >= 0; j--) {
+    let best = null; for (const r of RDH[j].r) if (Math.abs(r - ref) < RW_GATE && (best === null || Math.abs(r - ref) < Math.abs(best - ref))) best = r;
+    if (best !== null) { h.push([RDH[j].tc, best]); ref = best; }
+  }
+  if (h.length < RW_MIN) return null;
+  h.reverse();
+  const tS = h[0][0] - RW_OFF, tE = h[h.length - 1][0] - RW_OFF;
+  // double integral of the acceleration from tS, sampled at the history times (shifted by RW_OFF)
+  const acc = ACCH.filter(a => a[0] >= tS - 20 && a[0] <= tE + 20);
+  if (acc.length < 20) return null;
+  const X = []; let vE = 0, vN = 0, xE = 0, xN = 0, k = 0, tp = acc[0][0];
+  for (const [th] of h) {
+    const tq = th - RW_OFF;
+    while (k < acc.length && acc[k][0] <= tq) { const dt = (acc[k][0] - tp) / 1000; vE += acc[k][1] * dt; vN += acc[k][2] * dt; xE += vE * dt; xN += vN * dt; tp = acc[k][0]; k++; }
+    X.push([xE, xN]);
+  }
+  const n = h.length, M = [], y = [];
+  for (let i = 0; i < n; i++) { const t = (h[i][0] - h[0][0]) / 1000; M.push([1, t, t * t, -X[i][0], -X[i][1]]); y.push(h[i][1]); }
+  const MtM = [0, 1, 2, 3, 4].map(a => [0, 1, 2, 3, 4].map(b => { let v = 0; for (let i = 0; i < n; i++) v += M[i][a] * M[i][b]; return v; }));
+  const Mty = [0, 1, 2, 3, 4].map(a => { let v = 0; for (let i = 0; i < n; i++) v += M[i][a] * y[i]; return v; });
+  const c = solveN(MtM.map(r => r.slice()), Mty.slice()); if (!c) return null;
+  let ss = 0; for (let i = 0; i < n; i++) { let v = y[i]; for (let a = 0; a < 5; a++) v -= M[i][a] * c[a]; ss += v * v; }
+  const s2 = ss / Math.max(1, n - 5);
+  const psi = (yaw + FWD_OFF) * Math.PI / 180, fE = Math.sin(psi), fN = Math.cos(psi), sE = Math.cos(psi), sN = -Math.sin(psi);
+  // variance of the forward component: s2 * f' (M'M)^-1 f, via solving (M'M) w = [0,0,0,fE,fN]
+  const wv = solveN(MtM.map(r => r.slice()), [0, 0, 0, fE, fN]); if (!wv) return null;
+  const varF = s2 * (fE * wv[3] + fN * wv[4]);
+  // forward movement left after removing a parabola (how much there was to tell from)
+  const xf = X.map(v => v[0] * fE + v[1] * fN), Q = [];
+  for (let i = 0; i < n; i++) { const t = (h[i][0] - h[0][0]) / 1000; Q.push([1, t, t * t]); }
+  const QtQ = [0, 1, 2].map(a => [0, 1, 2].map(b => { let v = 0; for (let i = 0; i < n; i++) v += Q[i][a] * Q[i][b]; return v; }));
+  const Qtx = [0, 1, 2].map(a => { let v = 0; for (let i = 0; i < n; i++) v += Q[i][a] * xf[i]; return v; });
+  const qc = solveN(QtQ, Qtx); let mot = 0;
+  if (qc) { for (let i = 0; i < n; i++) { const d = xf[i] - (qc[0] + qc[1] * Q[i][1] + qc[2] * Q[i][2]); mot += d * d; } mot = Math.sqrt(mot / n); }
+  const uf = c[3] * fE + c[4] * fN, us = c[3] * sE + c[4] * sN, z = varF > 0 ? uf / Math.sqrt(varF) : 0;
+  const v = mot < RW_MOT ? '?' : z >= 2.5 ? 'a' : z <= -2.5 ? 'b' : '?';
+  return { uf, us, z, n, mot, v };
+}
 function motionTick(yaw) {
   const now = performance.now();
   if (!MO) MO = { hpE: 0, hpN: 0, mE: 0, mN: 0, lpE: 0, lpN: 0, ta: null, yaw, ty: now, n: 0, raw: [] };
@@ -410,6 +476,7 @@ function motionTick(yaw) {
     const dec = Math.exp(-dt / TAU_V);
     MO.hpE = MO.hpE * dec + (aE - MO.mE) * dt; MO.hpN = MO.hpN * dec + (aN - MO.mN) * dt; MO.n++;
     if (MO.raw.length < 200) MO.raw.push([t, aE, aN]);
+    ACCH.push([t, aE, aN]); while (ACCH.length && t - ACCH[0][0] > 5000) ACCH.shift();
   }
   const dty = (now - MO.ty) / 1000;
   if (dty > 0) {
@@ -1019,6 +1086,9 @@ function frame(binM, binS, t0) {
       const spanMs = UD ? 0 : Math.max(0, clickJ - 1) * PERIOD / SR * 1000;
       for (const q of kept) q.mo = echoDirFromMotion(q, t0 - ageMs, spanMs, yawUse);
       for (const id of [...MOTR.keys()]) if (!TRK.some(t => t.id === id)) MOTR.delete(id);
+      RDH.push({ tc: t0 - ageMs, r: kept.map(q => q.r - (q.dc || 0)) });
+      while (RDH.length && (t0 - ageMs) - RDH[0].tc > RW_WIN) RDH.shift();
+      for (const q of kept) q.rd = q.tconf ? roughDir(q.r - (q.dc || 0), yawUse) : null;
       const pvNow = phoneVelAvg(t0 - ageMs - 50, t0 - ageMs + 50), psiNow = (yawUse + FWD_OFF) * Math.PI / 180;
       const prof = new Float32Array(tp.prof.length);
       const best = kept.length ? Math.max(...kept.map(q => q.l)) : (shown.length ? Math.max(...shown.map(q => q.l)) : 0);
@@ -1038,7 +1108,8 @@ function frame(binM, binS, t0) {
         e: kept.map(q => [+q.r.toFixed(3), +q.l.toFixed(1), +q.lag.toFixed(1), q.dir[0], +(20 * Math.log10(q.heard2 + 1e-9)).toFixed(1), +q.match.toFixed(2),
           q.v == null ? null : +(100 * q.v).toFixed(2), q.vq == null ? null : +q.vq.toFixed(2), q.vsrc || null,
           q.tid || null, q.tconf ? 1 : 0, q.tv == null ? null : +(100 * q.tv).toFixed(1), +(100 * q.dc).toFixed(1),
-          q.mo ? [+q.mo.uf.toFixed(2), +q.mo.us.toFixed(2), +q.mo.zf.toFixed(1), +q.mo.zs.toFixed(1), q.mo.n, +(100 * q.mo.fwdRms).toFixed(1), +(100 * q.mo.res).toFixed(1)] : null]), mn: mnClicks, fr: frames,
+          q.mo ? [+q.mo.uf.toFixed(2), +q.mo.us.toFixed(2), +q.mo.zf.toFixed(1), +q.mo.zs.toFixed(1), q.mo.n, +(100 * q.mo.fwdRms).toFixed(1), +(100 * q.mo.res).toFixed(1)] : null,
+          q.rd ? [q.rd.v, +q.rd.uf.toFixed(2), +q.rd.us.toFixed(2), +q.rd.z.toFixed(1), q.rd.n, +(100 * q.rd.mot).toFixed(2)] : null]), mn: mnClicks, fr: frames,
         tc: Math.round(t0 - ageMs), cs: clkSrc, ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [],
         pv: pvNow ? [+(100 * (pvNow.e * Math.sin(psiNow) + pvNow.n * Math.cos(psiNow))).toFixed(1), +(100 * (pvNow.e * Math.cos(psiNow) - pvNow.n * Math.sin(psiNow))).toFixed(1)] : null, na: MO ? MO.n : 0,
         nt: TRK.filter(t => t.conf).length, co: shown.filter(q => q.coast).map(q => [+q.r.toFixed(2), q.tid]), p: tp.rawDb });
@@ -1118,7 +1189,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null]; pv = phone velocity [forward, right] cm/s at this reading; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
