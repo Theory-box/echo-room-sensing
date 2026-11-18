@@ -189,3 +189,12 @@ Checked on the raw wall recording (2026-11-18 11:52) where possible:
   detected 2.6 % vs 26 % ahead); bearing from echo strength vs yaw (Kuc 1997) ≈ what the wall finder's power-weighted
   centre does. Unlikely to transfer: synthetic aperture / Doppler beam sharpening by hand at λ 1.8 cm, MVDR with 2 mics,
   bat spectral-notch cues, full track-before-detect.
+
+## Brainstorm idea 1 tested: does the pitch-band ratio tell the off-axis angle? (2026-11-18) — No (Quiet)
+Raw audio of 8 Quiet sessions (last 20 s each), 3443 echo-clicks from walls the app found; angle = heading − the
+wall's middle heading. High band (19–22 kHz) minus low band (16–19 kHz) echo level, each re its own direct sound:
+0–5° −9.9 dB, 5–10° −9.5, 10–20° −9.4, 20–30° −9.0, 30–45° −8.3, 45–70° −10.2 (p25–p75 spread ±3 dB in every bin);
+per session on-axis vs ≥ 20° off differ by −0.3…+2.9 dB, mostly the WRONG way (off-axis has relatively more highs).
+The phone speaker's beam barely changes between 16 and 22 kHz (only 1.4× in frequency) — far less than the
+click-to-click spread. Untested: Strong (2–12 kHz, 6× in frequency) might show a real effect; no raw Strong recordings.
+Script: analysis/band_ratio_vs_angle.py.
