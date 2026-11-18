@@ -588,3 +588,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   (3) Leaky-integrator crossover 0.7 → 1.2 s (0.6 Hz: gain ~0.92 → ~0.97, lead ~100 → ~60 ms). (4) Raw horizontal
   acceleration logged per reading (`ac`), so gain/delay can be fitted offline against echo-derived motion.
   Sims unchanged (walls 43/48 at 2 bands; motion cases 0 wrong). Installed; not yet tested on the phone.
+- **Phone test of "sensor timing" (2026-11-18 12:37 push test 30 s, 12:38 sweep 54 s; both Quiet long 15/s, High,
+  1 pitch band — left over from the comparison).** Capture clock used on every reading (`cs` = c); clicks are
+  168–226 ms old when processed (median 197). Push test too gentle/irregular to calibrate: forward acceleration rms
+  0.10 m/s² (peak 0.43; a 5 cm push at 1 Hz peaks ~2 m/s²) → accel-derived motion 0.15 cm rms vs wall-echo jitter
+  1.2 cm; no clear rhythm; cross-correlation 0.22 at the edge of the lag range → gain/delay not determined.
+  Still part: wall echo steady to 0.2–0.3 cm. Sweep vs the 12:14 1-band sweep (same spot): step between readings
+  median 0.40 vs 0.60 cm, 1-s wobble 1.26 vs 1.66 cm, walls/min 45 vs 34 — better, but a short single session.
