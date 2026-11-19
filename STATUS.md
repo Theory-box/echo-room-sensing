@@ -934,3 +934,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - Box-room move tests unchanged (1-5 cm), no bogus pieces.
   - **Real 20:19 replay:** same position (1.05 m); 3 new dashed pieces (2 likely furniture fronts ~30 cm before walls,
     one at 5.2 m); no box wall cut.
+- **Room-shape test (20:49, build "room shape"):** user: "everything looks perfect".
+  - **Lock (44 s):** one wall at 4.88 m (through an opening); refitting at spot 1 corrected it to 1.21 m before the
+    move.
+  - **Walk:** 1.11 m measured (195 readings over 14 s, heading -176).
+  - **Found:** moved 1.15 m (along the walk 1.12 m, which agrees; sideways -0.27 m vs the walk's straight-line +0.11,
+    one wall each way).
+  - **New dashed pieces:** 1.41 / 2.19 / 5.26 m. The 5.2 m surface recurs (5.23 m in the 20:19 replay): something
+    seen through an opening.
+  - **Box sizes in this room across sessions:** one axis 3.69 / 3.97 / 3.74 / 3.74 m, consistent; the other
+    2.71 / 2.98 / 2.96 earlier vs 3.75 today -- one wall of that pair differs by ~0.8 m (a near surface ~0.6-0.8 m
+    in earlier sessions vs 1.21 m today). User says the room is roughly square, which favours today's 3.75 x 3.74.
