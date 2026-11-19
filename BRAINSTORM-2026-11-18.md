@@ -63,3 +63,28 @@
 - forward-walk aperture as the sideways tracker;
 - audible BatMapper-style chirps (inaudible preferred);
 - echo-only symmetry breaking.
+
+## Final refinements (partner's last round)
+- **Bounce filter at track level, not per reading.** A steady surface in a sector is a bounce if, over at least 10
+  readings, it follows r_a + r_b (or 2·r_a) with residual sd <= 2 cm, correlated jitter (>= 0.5) and appears
+  mostly when both parents are present. Never flag a track that fits a locked wall. Where a wall coincides with a
+  sum, a walk or a second spot splits them (a bounce moves 2x, a wall 1x).
+- **Opacity rule guard.** The farther surface must be heard over >= ~60% of the nearer one's heading span. If it
+  is heard only in a narrow window, it is seen through a doorway in the nearer surface: the nearer one stays the
+  wall and the far one becomes an opening marker. In the opacity case the nearer surface goes to a "half wall /
+  furniture" layer instead of being discarded.
+- **Furniture fingerprint = accept/reject gate only.** Reject a placement if its clutter score is < ~10 points
+  above offset controls (every good run cleared them by 15-37). A sharper version later: furniture points
+  triangulated from 2+ spots.
+- **Likely link:** the "2 possible spots ~35 cm apart" alternatives match the 1.05 / 1.45 m gap (0.40 m), so they
+  are probably the same wall-choice problem, not a position symmetry. Check offline which surface each spot's vote
+  used; fixing the wall choice may remove them.
+- **Revised order:**
+  1. Bounce filter (track level).
+  2. Opacity rule with the guard.
+  3. Pooled widths.
+  4. Fingerprint gate.
+  5. User: what is at 1.05 / 1.45 m + lift test.
+  6. One slow walk toward that side.
+  7. Sideways second spot.
+  8. Crab + wrist-glance walk, earpiece bench test.
