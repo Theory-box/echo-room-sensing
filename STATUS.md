@@ -1030,3 +1030,16 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - **Test button.** Shows a guided plan in the status line with countdowns, speaks each step, logs test-start /
     test-step / test-stop. Current plan = lift test (busy direction: knee 6 s, lift 7 s, head 5 s; then the same
     facing a plain wall).
+- **Lift test (22:46, Test button, larger room):** all 6 steps logged; phone stayed level (tilt -2..6 deg).
+  - **Half wall direction (heading ~69):**
+    - at knee height, mostly near-field (0.6-0.9 m) and weak, flat returns beyond 1 m (only a 2.45 m echo in 27%
+      of readings: the box's wall 2.7 m that way);
+    - at head height, new strong surfaces at ~1.1-1.3 m and ~1.6-1.7 m (raw profile -43..-45 dB vs ~-53 at knee),
+      plus ~2.6 m.
+    - The OPPOSITE of the expected half-wall signature (strong low, gone high).
+  - **Plain wall (heading ~-23):** strongest at ~1.2-1.3 m while lifting, ~1.5 m at head height (1.3 m still
+    present).
+  - **Unexplained:** either something low stands in front of that wall, or the phone was ~25 cm farther from the
+    body when held low (posture changes the arm length), which would shift every distance.
+  - **Inconclusive without the user's description:** distance / height of the half wall; whether the arm reached
+    farther when low.
