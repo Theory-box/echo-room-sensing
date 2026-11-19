@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="quietlong" selected>Inaudible chirps (16–22 kHz) – recommended</option><option value="strong">Low chirps (2–12 kHz, audible)</option><option value="mid">High chirps (8–16 kHz, faintly audible)</option><option value="wide">Full-range chirps (2–22 kHz, audible)</option><option value="quiettones">Inaudible chord – all pitches at once (16–22 kHz, compare)</option></select></label><div id="pingdesc" class="hint" style="font-size:12px;opacity:0.8;margin:2px 0 6px"></div>
+    <label>Ping <select id="ping"><option value="quietlong" selected>Inaudible chirps (16–22 kHz) – recommended</option><option value="strong">Low chirps (2–12 kHz, audible)</option><option value="mid">High chirps (8–16 kHz, faintly audible)</option><option value="wide">Full-range chirps (2–22 kHz, audible)</option><option value="quiettones">Inaudible chord – all pitches at once (16–22 kHz, compare)</option><option value="record">Record only – no sound, all mics, keeps 2 min</option></select></label><div id="pingdesc" class="hint" style="font-size:12px;opacity:0.8;margin:2px 0 6px"></div>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -116,6 +116,10 @@ const PINGS = {
   // tone can be separated exactly. The radar shows nothing in this mode; it only records (raw audio + motion) for
   // offline analysis.
   hum: { sig: null, amp: 0.9, hum: true },
+  // RECORD ONLY (2026-11-19): plays nothing, records every mic the phone gives (3 on the Pixel), keeps the last
+  // RECORD_SECS and saves them as raw_audio.wav at Stop, with heading / motion logged every 0.1 s (the Hum logger).
+  // General-purpose recorder for experiments where something else makes the sound (e.g. the PC speaker tests).
+  record: { sig: null, amp: 0, hum: true, record: true, mics3: true },
   // EXPERIMENT (2026-11-18, replaces the click+hum hybrid, which halved detections and whose hum the clicks
   // disturbed): an all-tone sonar. HS_NT steady tones 16-22 kHz, HS_DF apart, played continuously (no silent gaps:
   // ~3-5 dB more sound energy than Quiet's half-time clicks). Evenly spaced steady tones = a signal that repeats every
@@ -134,7 +138,8 @@ let PING = PINGS.strong.sig;
 // sweep geometry of the current ping, for the motion correction of distances: centre frequency, length (s), band (Hz)
 let PING_FC = 7000, PING_T = 0.015, PING_B = 10000;
 const HUM_N = 16, HUM_F0 = 17000, HUM_DF = 250, HUM_LOOP = 4800;   // 4800 = 25 x 192 samples (0.1 s)
-let HUM = false;
+let HUM = false, REC_ONLY = false, RAW_SECS = 40;
+const RECORD_SECS = 120;   // Record only: seconds kept (3 mics x 2 min of 32-bit float = ~69 MB in memory)
 // ---------- all-tone sonar ("Quiet tones") ----------
 let HS_P = 2048, HS_K0 = 683, HS_NT = 256;
 const HS_J = 3, HS_M = 1024, HS_PILOT = 2, HS_PSTEP = 16, HS_POFF = 8;
@@ -1369,7 +1374,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 sens resets per mode';
+const APP_BUILD = '2026-11-19 record only mode';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2204,7 +2209,10 @@ function humFrame(t0) {
     e: [], ac: MO ? MO.raw.splice(0).map(a => [Math.round(a[0]), +a[1].toFixed(3), +a[2].toFixed(3)]) : [] });
   if (sonarLog.length >= 6000) saveLog(true);
   drawFrame(theta, +$('range').value);
-  $('status').textContent = `Hum test: recording (${Math.round(frames / SR)} s). The last 40 s are saved when you press Stop.`;
+  let mics = 2; try { if (Native.micChannels) mics = Native.micChannels(); } catch (e) { }
+  $('status').textContent = REC_ONLY
+    ? `Recording, no sound (${Math.round(frames / SR)} s, ${mics} mics). The last ${Math.round(RAW_SECS / 60 * 10) / 10} min are saved when you press Stop.`
+    : `Hum test: recording (${Math.round(frames / SR)} s). The last 40 s are saved when you press Stop.`;
 }
 async function start(keep) {
   if (!Native.hasMicPermission()) { $('status').textContent = 'Microphone permission missing.'; return; }
@@ -2225,8 +2233,12 @@ async function start(keep) {
   const vol = +$('vol').value / 100 * (MOVE_LOUD ? LOUD_AMP : 1);   // (half amplitude for the loud walking ticks) levels are measured relative to each click's own direct sound,
   if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
   let play, loopLen = PERIOD;
-  HUM = !!P.hum; HS = !!P.tones;
-  if (HUM) {
+  HUM = !!P.hum; HS = !!P.tones; REC_ONLY = !!P.record; RAW_SECS = REC_ONLY ? RECORD_SECS : 40;
+  if (REC_ONLY) {
+    PERIOD = HUM_LOOP; loopLen = HUM_LOOP; PING_UP = PING_DN = LOW_UP = LOW_DN = null;
+    play = new Float32Array(HUM_LOOP);   // silence: the speaker plays nothing
+    logEv('record', { keepSeconds: RECORD_SECS, micsAsked: 3 });
+  } else if (HUM) {
     PERIOD = HUM_LOOP; loopLen = HUM_LOOP; PING_UP = PING_DN = LOW_UP = LOW_DN = null;
     const h = humLoop(); play = new Float32Array(HUM_LOOP);
     for (let i = 0; i < HUM_LOOP; i++) play[i] = P.amp * vol * h.x[i];
@@ -2251,6 +2263,7 @@ async function start(keep) {
     for (let i = 0; i < play.length; i++) play[i] = P.amp * vol * PING.I[i];
   }
   try { if (Native.setMicChannels) Native.setMicChannels(P.mics3 ? 3 : 2); } catch (e) { }
+  try { if (Native.setRingSeconds) RAW_SECS = Native.setRingSeconds(RAW_SECS); } catch (e) { }
   const r = Native.sonarStart(f32ToB64(play), loopLen, SR);
   if (r !== 'ok') { $('status').textContent = 'Could not start: ' + r; logEv('start-failed', { msg: String(r).slice(0, 200) }); try { Native.sonarRestoreVolume(); } catch (e) { } return; }
   running = true; lastFrames = -1; staleSince = 0; motionReset(); ptReset(); MN_TRACKS = []; resetBG(); D_LOCK = null; CLK = new Map(); resetTracks();
@@ -2270,7 +2283,7 @@ function saveLog(partial) {
     // last 20 s (40 s for tone modes) of the mics as a 32-bit float WAV (ch1 bottom, ch2 back, ch3 third mic if
     // "Mics recorded: 3"), for checking the processing offline; the result string ends with the channel count
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 40); /* last 40 s (the phone keeps 40 s) in every mode, so a turn + a walk fit (2026-11-18) */ } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', RAW_SECS); /* last 40 s (Record only: RECORD_SECS) (the phone keeps 40 s) in every mode, so a turn + a walk fit (2026-11-18) */ } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
@@ -2306,6 +2319,7 @@ const PING_DESC = {
   mid: 'A short rising glide each click, higher pitches: faintly audible, a narrower beam than Low.',
   wide: 'A long glide over every pitch: the sharpest distances and hears corners best, but you will hear it.',
   quiettones: 'Every pitch at once, nonstop (like a held chord), too high to hear. Kept for comparing with Inaudible chirps.',
+  record: 'Plays nothing. Records every microphone and the motion sensors, and saves the last 2 minutes when you press Stop. For experiments where something else makes the sound.',
 };
 function showViewHelp() {
   const P = PINGS[$('ping').value] || {}, show = (id, on) => { const l = $(id).closest('label'); if (l) l.style.display = on ? '' : 'none'; };

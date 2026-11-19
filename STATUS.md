@@ -1096,3 +1096,7 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     (`if (!UD && !HS)`), so the speaker leak tail is reported. The fan at 0.41 m is inside NEAR_M = 0.6 m in every mode.
 - Change (build "2026-11-19 sens resets per mode"): switching Ping mode resets Sensitivity to that mode's default
   (Auto for the inaudible modes, Medium for audible) instead of carrying the previous choice over.
+- Record only mode (build "2026-11-19 record only mode"): Ping menu "Record only – no sound, all mics, keeps 2 min".
+  Plays silence, asks for 3 mics, keeps the last 120 s (native ring length now settable, `setRingSeconds`, 10-180 s),
+  logs heading/motion every 0.1 s like the Hum logger, saves raw_audio.wav at Stop. The raw save now streams to the
+  file in 1 s pieces instead of building the whole WAV in memory.

@@ -88,6 +88,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     private long ringFrames = 0;          // total frames written
     private int ringCap = 0;              // capacity in frames
     private volatile int micReq = 2;      // channels the page asks for: 2 (bottom + back) or 3 (all mics, test)
+    private volatile int ringSecs = 40;   // seconds of recording kept (Record only mode asks for more)
     private int nch = 2;                  // channels actually recorded (ring is interleaved by nch)
     private final Object ringLock = new Object();
     private volatile int sonarGen = 0;             // each start gets a new generation; an old record thread exits on mismatch
@@ -160,7 +161,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             recOrNull = rec;
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("AudioRecord not initialized");
             synchronized (ringLock) {
-                ringCap = sr * 40;   // 40 s: live view reads the last ~0.5 s; the rest is kept for saveSessionRaw (hum test: 40 s)
+                ringCap = sr * ringSecs;   // 40 s by default: live view reads the last ~0.5 s; the rest is kept for saveSessionRaw
                 tsFrame = -1;
                 nch = rec.getChannelCount() >= 3 ? 3 : 2;
                 ring = new float[ringCap * nch];
@@ -655,6 +656,8 @@ public class MainActivity extends Activity implements SensorEventListener {
          *  device gives no capture timestamps. Same clock as the sensor timestamps. */
         /** Mics to record from the next sonarStart: 2 (normal) or 3 (all mics, test). Returns what will be asked for. */
         @JavascriptInterface public int setMicChannels(int n) { micReq = n == 3 ? 3 : 2; return micReq; }
+        /** Seconds of recording to keep from the next sonarStart (10..180; default 40). Returns what will be used. */
+        @JavascriptInterface public int setRingSeconds(int s) { ringSecs = Math.max(10, Math.min(180, s)); return ringSecs; }
         /** Channels the current recording actually has. */
         @JavascriptInterface public int micChannels() { return nch; }
         @JavascriptInterface public String sonarClock() {
@@ -734,23 +737,34 @@ public class MainActivity extends Activity implements SensorEventListener {
          *  Returns "file|endFrame|frames": endFrame = recording sample counter at the last sample (as sonarReadBoth). */
         @JavascriptInterface public String saveSessionRaw(String fileName, int seconds) {
             if (sessionDir == null) return "no session";
-            float[] out; long end; int n;
+            long end; int n, ch;
             synchronized (ringLock) {
                 if (ring == null || ringFrames == 0) return "no recording";
                 n = (int) Math.min(Math.min(ringFrames, ringCap), (long) seconds * 48000);
-                end = ringFrames; out = new float[n * nch];
-                for (int i = 0; i < n; i++) { int pos = (int) ((end - n + i) % ringCap); for (int c = 0; c < nch; c++) out[nch * i + c] = ring[nch * pos + c]; }
+                end = ringFrames; ch = nch;
             }
-            int dataBytes = out.length * 4;
-            ByteBuffer bb = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN);
-            bb.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataBytes).put("WAVE".getBytes(StandardCharsets.US_ASCII));
-            bb.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 3).putShort((short) nch).putInt(48000)
-              .putInt(48000 * nch * 4).putShort((short) (nch * 4)).putShort((short) 32);
-            bb.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataBytes);
-            for (float v : out) bb.putFloat(v);
-            try (FileOutputStream f = new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName))) {
-                f.write(bb.array());
-                return fileName + "|" + end + "|" + n + "|" + nch;
+            // written in 1 s pieces (a 3-mic, 3-minute recording would need several 100 MB copies in one go)
+            int dataBytes = n * ch * 4;
+            ByteBuffer hdr = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+            hdr.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataBytes).put("WAVE".getBytes(StandardCharsets.US_ASCII));
+            hdr.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 3).putShort((short) ch).putInt(48000)
+               .putInt(48000 * ch * 4).putShort((short) (ch * 4)).putShort((short) 32);
+            hdr.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataBytes);
+            try (java.io.BufferedOutputStream f = new java.io.BufferedOutputStream(
+                    new FileOutputStream(new File(new File(getFilesDir(), sessionDir), fileName)), 1 << 16)) {
+                f.write(hdr.array());
+                final int CH = 48000;
+                ByteBuffer bb = ByteBuffer.allocate(CH * ch * 4).order(ByteOrder.LITTLE_ENDIAN);
+                for (int i0 = 0; i0 < n; i0 += CH) {
+                    int m = Math.min(CH, n - i0);
+                    bb.clear();
+                    synchronized (ringLock) {
+                        if (ring == null || nch != ch) return "save failed: recording restarted";
+                        for (int i = i0; i < i0 + m; i++) { int pos = (int) ((end - n + i) % ringCap); for (int c = 0; c < ch; c++) bb.putFloat(ring[ch * pos + c]); }
+                    }
+                    f.write(bb.array(), 0, m * ch * 4);
+                }
+                return fileName + "|" + end + "|" + n + "|" + ch;
             } catch (IOException e) {
                 return "save failed: " + e;
             }
