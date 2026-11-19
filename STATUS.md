@@ -913,3 +913,24 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   (at least 20:05, 20:12, 20:19, and probably some of the 18:4x-18:5x ones) are in a larger room, ~3.5 x 3.7 m, which
   the user confirmed by pushing toward each of the four walls (distances tracked smoothly and looked right). Boxes of
   ~3.5-3.9 m in those sessions are correct, not errors; check which room a session was in before comparing box sizes.
+- **Room shape beyond the box (build "room shape"):**
+  - **Wall pieces:** walls stay at right angles to the locked rotation, but there can be more than four. Extra wall
+    pieces (orange; dashed until a second spot confirms them) come from echoes the known walls can't explain after a
+    spot is placed. Each wall remembers where you stood when it answered / when it stayed silent while another surface
+    that way answered, so walls can END (box walls are drawn cut short).
+  - **Matching** uses every wall you could be standing in front of (two passes).
+  - **New-piece rules:** not ring / moves-with-you / push ghost; must answer facing it and be quiet in the diagonal
+    directions. A box wall is only cut if it got no echoes at all from that spot.
+  - **The box only refits while at the first spot.**
+  - **Measured walk:** while paused, the line (distance vs time, +-4 cm) most readings agree with, facing the main
+    walking direction, gives the step (>= 10 readings over >= 1.5 s, >= 15 cm); it is the starting guess for the
+    match (sigma 0.3 m, else 1.5 m around the last spot). The status reports the walk, % of echoes matching the room,
+    and new pieces.
+  - **Sim (stub now has finite walls + blocking), L room, 3 spots:**
+    - walks measured 2.59 / 3.09 m (true 2.60 / 3.26);
+    - positions within 1-3 cm in the app's frame (the sim's box is rotated 5 deg by its known timing offset);
+    - both inner walls of the L found (1.01 m vs 1.0; 1.52 vs 1.5);
+    - box north / east walls cut at 1.31 / where the leg begins.
+  - Box-room move tests unchanged (1-5 cm), no bogus pieces.
+  - **Real 20:19 replay:** same position (1.05 m); 3 new dashed pieces (2 likely furniture fronts ~30 cm before walls,
+    one at 5.2 m); no box wall cut.

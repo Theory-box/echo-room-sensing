@@ -73,6 +73,8 @@
     the phone; reflection ghosts and the ceiling stay put and are removed from the map (always on in Map view).
     <b>Dots:</b> amber = you are near square-on to a surface -- sweep slowly back and forth across it, or push in and out.
     Green = a good reading of that surface was collected; work your way round until the walls have green dots.
+    <b>Orange walls</b> are wall pieces learned from later spots (the room isn't always a box -- e.g. the inner walls of an
+    L); dashed until a second spot confirms them. The box's own walls are cut short where they turn out to end.
     <b>More spots:</b> once the room is locked, tap <b>Pause to move</b> (mapping pauses), walk anywhere in the room (stay
     about an arm's length from the walls), tap <b>Resume here</b>, then turn all the way round once. The app finds where you
     are from the walls and adds that sweep to the map. Nothing you have mapped is lost.</p>
@@ -674,36 +676,75 @@ function moveDrawLive(sc) {   // while collecting the new spot's turn: its echoe
   }
   actx.restore();
 }
-function relocVote(E, d) {
-  const L = SLM, NB = 400, ax = []; let total = 0;
-  for (let a = 0; a < 2; a++) {
-    const cA = new Float32Array(NB), cB = new Float32Array(NB);
-    for (const [h0, r] of E) {
-      const h = h0 - d;
-      for (const j of [a, a + 2]) {
-        if (L.sup[j] <= 2 * L.clutter) continue;
-        const off = angDiff(h, L.rot + 90 * j); if (Math.abs(off) >= RB_FACE) continue;
-        let sv = L.D[j] - r - ARM * Math.cos(off * Math.PI / 180); if (j >= 2) sv = -sv;
-        const b = Math.round((sv + 2) / 0.01); if (b >= 0 && b < NB) (j === a ? cA : cB)[b]++;
-      }
-    }
-    const sA = new Float32Array(NB), sB = new Float32Array(NB);
-    for (let b = 0; b < NB; b++) for (let k = -3; k <= 3; k++) { const i = b + k; if (i >= 0 && i < NB) { sA[b] += cA[i]; sB[b] += cB[i]; } }
-    const sc = b => sA[b] + sB[b];
-    let bi = -1, bv = 0; for (let b = 0; b < NB; b++) if (sc(b) > bv) { bv = sc(b); bi = b; }
-    let ai = -1, av = 0;
-    for (let b = 1; b < NB - 1; b++) if (Math.abs(b - bi) > 10 && sc(b) > av && sc(b) >= sc(b - 1) && sc(b) >= sc(b + 1)) { av = sc(b); ai = b; }
-    ax.push({ s: bi < 0 ? null : bi * 0.01 - 2, nA: bi < 0 ? 0 : sA[bi], nB: bi < 0 ? 0 : sB[bi], alt: ai < 0 ? null : ai * 0.01 - 2, nAlt: av, score: bv });
-    total += bv;
-  }
-  return { ax, total };
+// ---------- Room shape beyond the box (2026-11-18): rooms aren't always boxes ----------
+// Walls stay at right angles (the locked rotation), but there can be more than four: the box's four walls plus extra
+// wall pieces (XW) learned from later spots -- e.g. the inner walls of an L. Each wall remembers where along it you
+// stood when it answered ("heard at", tangent coordinates) and where you stood facing its direction when something
+// else answered instead ("missed at"); between the two it ends. A wall only takes part in matching when you could be
+// standing in front of it. Extra pieces come from echoes the known walls can't explain, once a spot has been placed.
+// The box itself is only refitted while you are at the first spot (later spots would mix in other parts of the room).
+let XW = [], SPOTS = 1;
+const XW_TOL = 0.05, XW_NEW = 12, XW_SEP = 0.15, XW_HEARD = 4;
+const nrmJ = j => { const a = (SLM.rot + 90 * j) * Math.PI / 180; return [Math.sin(a), Math.cos(a)]; };
+const tngJ = j => { const a = (SLM.rot + 90 * j) * Math.PI / 180; return [Math.cos(a), -Math.sin(a)]; };
+function wallBounds(w) {          // [lo, hi] along the wall (tangent coordinate of where you stand); open side = +-Inf
+  if (!w.heard.length) return [-Infinity, Infinity];
+  const h0 = Math.min(...w.heard), h1 = Math.max(...w.heard);
+  const below = w.miss.filter(m => m < h0), above = w.miss.filter(m => m > h1);
+  return [below.length ? (Math.max(...below) + h0) / 2 : -Infinity, above.length ? (Math.min(...above) + h1) / 2 : Infinity];
 }
-function relocalize(E) {
+function wallList(pos) {          // walls you could hear from pos (null = all known walls)
+  const L = SLM, out = [];
+  for (let j = 0; j < 4; j++) if (L.sup[j] > 2 * L.clutter) out.push({ j, D: L.D[j], base: true, ref: L.wb[j] });
+  for (const w of XW) out.push({ j: w.j, D: w.D, base: false, ref: w });
+  if (!pos) return out;
+  return out.filter(w => { const t = tngJ(w.j), c = t[0] * pos[0] + t[1] * pos[1], [lo, hi] = wallBounds(w.ref); return c >= lo && c <= hi; });
+}
+const NBV = 600;   // vote range -3..+3 m in 1 cm steps
+function relocVote(E, d, pos) {   // per axis: smoothed vote over your offset, from every wall facing each echo's direction
+  const W = wallList(pos), ax = [];
+  for (let a = 0; a < 2; a++) {
+    const S = new Float32Array(NBV), Pp = new Float32Array(NBV), Nn = new Float32Array(NBV);
+    for (const w of W) {
+      if (w.j % 2 !== a) continue;
+      const c = new Float32Array(NBV);
+      for (const [h0, r] of E) {
+        const off = angDiff(h0 - d, SLM.rot + 90 * w.j); if (Math.abs(off) >= RB_FACE) continue;
+        let sv = w.D - r - ARM * Math.cos(off * Math.PI / 180); if (w.j >= 2) sv = -sv;
+        const b = Math.round((sv + 3) / 0.01); if (b >= 0 && b < NBV) c[b]++;
+      }
+      for (let b = 0; b < NBV; b++) { let v = 0; for (let k = -3; k <= 3; k++) { const i = b + k; if (i >= 0 && i < NBV) v += c[i]; } S[b] += v; (w.j < 2 ? Pp : Nn)[b] += v; }
+    }
+    ax.push({ S, P: Pp, N: Nn });
+  }
+  return ax;
+}
+function pickAxis(A, prior, sig) {   // best offset; prior (m) pulls toward the expected spot but strong evidence wins
+  const f = b => prior === null ? 1 : 0.3 + 0.7 * Math.exp(-(((b * 0.01 - 3) - prior) ** 2) / (2 * sig * sig));
+  let bi = -1, bv = 0; for (let b = 0; b < NBV; b++) { const v = A.S[b] * f(b); if (v > bv) { bv = v; bi = b; } }
+  let ai = -1, av = 0;
+  for (let b = 1; b < NBV - 1; b++) if (Math.abs(b - bi) > 10 && A.S[b] > av && A.S[b] >= A.S[b - 1] && A.S[b] >= A.S[b + 1]) { av = A.S[b]; ai = b; }
+  return { s: bi < 0 ? null : bi * 0.01 - 3, nA: bi < 0 ? 0 : A.P[bi], nB: bi < 0 ? 0 : A.N[bi], score: bi < 0 ? 0 : A.S[bi], wscore: bv,
+    alt: ai < 0 ? null : ai * 0.01 - 3, nAlt: av };
+}
+function relocSolve(E, d, pos, prior, sig) {
+  const pr = a => prior === null ? null : SLM.N[a][0] * prior[0] + SLM.N[a][1] * prior[1];
+  const A = relocVote(E, d, pos), ax = A.map((v, a) => pickAxis(v, pr(a), sig));
+  return { d, v: { ax, total: ax[0].score + ax[1].score, w: ax[0].wscore + ax[1].wscore } };
+}
+function relocAt(E, d, prior, sig, first = null) {   // at heading correction d: all walls, then only walls you could be in front of
+  const best = first || relocSolve(E, d, null, prior, sig), ax = best.v.ax;
+  const pr = a => prior === null ? axisNow(a) : SLM.N[a][0] * prior[0] + SLM.N[a][1] * prior[1];
+  const o = [0, 1].map(a => ax[a].s !== null ? ax[a].s : pr(a));
+  const P0 = [o[0] * SLM.N[0][0] + o[1] * SLM.N[1][0], o[0] * SLM.N[0][1] + o[1] * SLM.N[1][1]];
+  const g = relocSolve(E, d, P0, prior, sig);
+  return confOf(g.v.total > 0 ? g : best);
+}
+function relocalize(E, prior = null, sig = 1.0) {   // prior: [x, y] expected position (room frame) or null
   let best = null;
-  for (let d = -TC_MAXD; d <= TC_MAXD; d++) { const v = relocVote(E, d); if (!best || v.total > best.v.total) best = { d, v }; }
-  for (const d of [best.d - 0.5, best.d + 0.5]) { const v = relocVote(E, d); if (v.total > best.v.total) best = { d, v }; }
-  confOf(best);
-  return best;
+  for (let d = -TC_MAXD; d <= TC_MAXD; d++) { const c = relocSolve(E, d, null, prior, sig); if (!best || c.v.w > best.v.w) best = c; }
+  for (const d of [best.d - 0.5, best.d + 0.5]) { const c = relocSolve(E, d, null, prior, sig); if (c.v.w > best.v.w) best = c; }
+  return relocAt(E, best.d, prior, sig, best);
 }
 function confOf(B) {
   B.conf = B.v.ax.map(a => a.nA >= 6 && a.nB >= 6 ? 'both' : Math.max(a.nA, a.nB) >= 6 ? 'one' : 'none');
@@ -712,23 +753,97 @@ function confOf(B) {
 }
 // heading from one turn is only trusted with the per-turn gates (sim 2026-11-18: with ~50 echoes a turn gave -3 for a
 // +5 drift and -8 for none); otherwise the position is found with no heading change
-function headingGate(E, B) {
+function headingGate(E, B, prior, sig) {
   if (B.v.total < TC_SUP || Math.abs(B.d) >= TC_MAXD) return { ok: false, half: null };
-  const h1 = relocalize(E.slice(0, E.length >> 1)), h2 = relocalize(E.slice(E.length >> 1)), half = Math.abs(h1.d - h2.d);
+  const h1 = relocalize(E.slice(0, E.length >> 1), prior, sig), h2 = relocalize(E.slice(E.length >> 1), prior, sig), half = Math.abs(h1.d - h2.d);
   return { ok: half <= TC_HALF, half };
 }
 const secOf = th => Math.floor((((th % 360) + 360) % 360) / 30);
 function axisNow(a) { return SLM.N[a][0] * SLM.x + SLM.N[a][1] * SLM.y; }
+// After a spot is placed: which walls answered from here (heard / missed), and new wall pieces from echoes no known
+// wall explains (a streak of >= XW_NEW echoes agreeing on one wall distance, facing one of the four directions).
+function learnSpot(E, d, P) {
+  const W = wallList(null), used = new Array(E.length).fill(false), tally = W.map(() => 0);
+  E.forEach(([h0, r], i) => {
+    W.forEach((w, k) => {
+      const off = angDiff(h0 - d, SLM.rot + 90 * w.j); if (Math.abs(off) >= RB_FACE) return;
+      const n = nrmJ(w.j), pred = w.D - (n[0] * P[0] + n[1] * P[1]) - ARM * Math.cos(off * Math.PI / 180);
+      if (Math.abs(pred - r) < XW_TOL) { used[i] = true; tally[k]++; }
+    });
+  });
+  const facing = new Set(E.map(([h0]) => Math.round(angDiff(h0 - d, SLM.rot) / 90 + 4) % 4));   // directions this turn faced
+  // new pieces from what is left
+  const added = [];
+  for (let j = 0; j < 4; j++) {
+    const n = nrmJ(j), cand = [];
+    E.forEach(([h0, r], i) => { if (used[i] || isRing(r) || withYou(r) || isGhost(r, h0)) return; const off = angDiff(h0 - d, SLM.rot + 90 * j); if (Math.abs(off) >= RB_FACE) return; cand.push(r + ARM * Math.cos(off * Math.PI / 180) + n[0] * P[0] + n[1] * P[1]); });
+    if (cand.length < XW_NEW) continue;
+    cand.sort((x, y) => x - y);
+    let bi = -1, bc = 0; for (let i = 0; i < cand.length; i++) { let c = 0; for (const v of cand) if (Math.abs(v - cand[i]) < 0.03) c++; if (c > bc) { bc = c; bi = i; } }
+    if (bc < XW_NEW) continue;
+    const grp = cand.filter(v => Math.abs(v - cand[bi]) < 0.03), D = grp.reduce((x, y) => x + y) / grp.length;
+    if (D - (n[0] * P[0] + n[1] * P[1]) < RB_MIN) continue;
+    // must behave like a wall: answers facing it, quiet in the diagonal directions (a ghost / ceiling answers everywhere)
+    const rr = D - (n[0] * P[0] + n[1] * P[1]) - ARM;
+    let nf = 0, Nf = 0, nd = 0, Nd = 0;
+    for (const [h0, r] of E) { const off = Math.abs(angDiff(h0 - d, SLM.rot + 90 * j));
+      if (off < RB_FACE) { Nf++; if (Math.abs(r + ARM * Math.cos(off * Math.PI / 180) - ARM - rr) < 0.05) nf++; }
+      else if (off >= 40 && off <= 140) { Nd++; if (Math.abs(r - rr) < 0.05) nd++; } }
+    if (Nd > 20 && nd / Nd > 0.5 * (nf / Math.max(1, Nf))) continue;
+    if (W.some(w => w.j === j && Math.abs(w.D - D) < XW_SEP) || XW.some(w => w.j === j && Math.abs(w.D - D) < XW_SEP)) continue;
+    const t = tngJ(j), w = { j, D, heard: [t[0] * P[0] + t[1] * P[1]], miss: [], sup: bc, spots: 1 }; XW.push(w); added.push(w);
+  }
+  // heard / missed bookkeeping for walls already known
+  W.forEach((w, k) => {
+    const t = tngJ(w.j), c = t[0] * P[0] + t[1] * P[1];
+    if (tally[k] >= XW_HEARD) { w.ref.heard.push(c); if (!w.base) { w.ref.spots++; w.ref.sup += tally[k]; } }
+    // "ends here": facing its direction, it got NO echoes while another surface that way answered well (a piece of
+    // furniture in front of a wall answers too, but then the wall itself usually still gets a few echoes)
+    else if (facing.has(w.j) && tally[k] === 0 && (W.some((o, m) => m !== k && o.j === w.j && tally[m] >= XW_HEARD) || added.some(o => o.j === w.j && o.sup >= 15))) w.ref.miss.push(c);
+  });
+  return { frac: E.length ? used.filter(Boolean).length / E.length : 0, added };
+}
+// Measured walk (user idea 2026-11-18): while paused, if you walk facing a wall, its echo slides steadily closer. All
+// readings from the walk are kept; the line (distance vs time) that most of them agree with (+-4 cm) is the wall;
+// wrong lock-ons and ghosts don't fit the line, and gaps don't matter. Walked = how far the line went.
+function walkEstimate(Wk) {
+  if (Wk.length < 8) return null;
+  let sx = 0, sy = 0; for (const w of Wk) { sx += Math.sin(w[1] * Math.PI / 180); sy += Math.cos(w[1] * Math.PI / 180); }
+  const h0 = Math.atan2(sx, sy) * 180 / Math.PI, P = [];
+  for (const [t, h, rs] of Wk) if (Math.abs(angDiff(h, h0)) <= 25) for (const r of rs) if (r > 0.35) P.push([t, r]);
+  if (P.length < 8) return null;
+  let best = null;
+  for (let it = 0; it < 400; it++) {
+    const a = P[(Math.random() * P.length) | 0], b = P[(Math.random() * P.length) | 0];
+    if (Math.abs(b[0] - a[0]) < 0.5) continue;
+    const sl = (b[1] - a[1]) / (b[0] - a[0]); if (sl > -0.05 || sl < -1.5) continue;
+    const inl = P.filter(q => Math.abs(q[1] - (a[1] + sl * (q[0] - a[0]))) < 0.04);
+    if (!best || inl.length > best.length) best = inl;
+  }
+  if (!best || best.length < 10) return null;
+  const n = best.length, mt = best.reduce((s2, q) => s2 + q[0], 0) / n, mr = best.reduce((s2, q) => s2 + q[1], 0) / n;
+  let sxy = 0, sxx = 0; for (const [t, r] of best) { sxy += (t - mt) * (r - mr); sxx += (t - mt) ** 2; }
+  const m = sxy / sxx, t0 = Math.min(...best.map(q => q[0])), t1 = Math.max(...best.map(q => q[0])), dist = -m * (t1 - t0);
+  if (t1 - t0 < 1.5 || dist < 0.15) return null;   // a short or tiny streak is more likely junk than a walk
+  return { dist, h: h0, n, span: t1 - t0 };
+}
 function moveTick(t0, theta, kept, mk, mR) {
   const M = MOVE, L = SLM; FO.live = null;
   M.buf.push({ theta, kept: kept.map(q => Object.assign({}, q)) }); M.secs.add(secOf(theta));
   for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) M.E.push([theta, q.r - (q.dc || 0)]);
   if (M.secs.size < MV_SECS || M.E.length < MV_NEED) return null;
-  let B = relocalize(M.E); const hg = headingGate(M.E, B);
-  if (!hg.ok) B = confOf({ d: 0, v: relocVote(M.E, 0) });
+  // starting guess: where the measured walk says you went (else: near where you were, loosely)
+  const wk = M.walkEst, prior = wk ? [L.x + wk.dist * Math.sin(wk.h * Math.PI / 180), L.y + wk.dist * Math.cos(wk.h * Math.PI / 180)] : [L.x, L.y];
+  const sig = wk ? 0.3 : 1.5;
+  let B = relocalize(M.E, prior, sig); const hg = headingGate(M.E, B, prior, sig);
+  if (!hg.ok) B = relocAt(M.E, 0, prior, sig);
   const ax = B.v.ax, d = B.d;
+  if (B.v.total < 25) {   // can't place this spot: keep collecting (another turn)
+    MOVEMSG = { until: performance.now() + 8000, text: "Couldn't place this spot yet (too few echoes match the room). Keep turning, or move a little closer to the mapped area." };
+    M.secs = new Set(); M.E = []; return null;
+  }
   const sx = [axisNow(0), axisNow(1)];
-  for (let a = 0; a < 2; a++) if (B.conf[a] !== 'none' && ax[a].s !== null) sx[a] = ax[a].s;
+  for (let a = 0; a < 2; a++) if (B.conf[a] !== 'none' && ax[a].s !== null) sx[a] = ax[a].s; else if (wk) sx[a] = SLM.N[a][0] * prior[0] + SLM.N[a][1] * prior[1];
   const ox = L.x, oy = L.y;
   L.x = sx[0] * L.N[0][0] + sx[1] * L.N[1][0]; L.y = sx[0] * L.N[0][1] + sx[1] * L.N[1][1];
   HCORR += d; L.Pa = L.Pc = 1e-4; L.Pb = 0; L.pend = [[], []]; L.rp = [[], []]; L.acc = [[], []]; L.t = null;
@@ -736,16 +851,20 @@ function moveTick(t0, theta, kept, mk, mR) {
     const th = angDiff(b.theta, d); updateMap(th, b.kept, mk, mR);
     for (const q of b.kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(th); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(L.x); RBOX.py.push(L.y); }
   }
+  const ls = learnSpot(M.E, d, [L.x, L.y]); SPOTS++;   // after drawing, so floor/ceiling rings from this turn are known
   if (RBOX.h.length > RB_N) { const k = RBOX.h.length - RB_N; for (const a of ['h', 'r', 'px', 'py']) RBOX[a].splice(0, k); }
   PG.buf = []; FO.tr = null; TURN = null;
   let near = null;
-  for (let j = 0; j < 4; j++) { if (L.sup[j] <= 2 * L.clutter) continue; const dist = L.D[j] - (j < 2 ? sx[j % 2] : -sx[j % 2]); if (near === null || dist < near) near = dist; }
+  for (const w of wallList([L.x, L.y])) { const n = nrmJ(w.j), dist = w.D - (n[0] * L.x + n[1] * L.y); if (dist > 0 && (near === null || dist < near)) near = dist; }
   const ct = a => B.conf[a] === 'both' ? 'sure' : B.conf[a] === 'one' ? (B.amb[a] ? 'unsure (2 possible spots)' : 'less sure (one wall)') : 'no wall heard';
   MOVEMSG = { until: performance.now() + 15000, text: `Found you: moved ${(100 * Math.hypot(L.x - ox, L.y - oy)).toFixed(0)} cm` +
-    (Math.abs(d) >= 0.5 ? `, heading corrected ${d > 0 ? '+' : ''}${d.toFixed(1)}°` : '') + ` (one way: ${ct(0)}; other way: ${ct(1)})` +
+    (wk ? ` (walk measured ${(100 * wk.dist).toFixed(0)} cm)` : '') +
+    (Math.abs(d) >= 0.5 ? `, heading corrected ${d > 0 ? '+' : ''}${d.toFixed(1)}°` : '') + ` (one way: ${ct(0)}; other way: ${ct(1)}). ` +
+    `${Math.round(100 * ls.frac)}% of echoes match the known room` + (ls.added.length ? `; ${ls.added.length} new wall piece${ls.added.length > 1 ? 's' : ''} added` : '') +
     (near !== null && near < 0.8 ? `. A wall is only ${near.toFixed(2)} m away: step toward the middle (very close walls get filtered out).` : '') };
   M.spot++; MOVE = null; $('moved').textContent = 'Pause to move';
-  return [+L.x.toFixed(3), +L.y.toFixed(3), +d.toFixed(1), Math.round(B.v.total), hg.ok ? 1 : 0, ...ax.map((a, i) => [a.s === null ? null : +a.s.toFixed(3), a.nA, a.nB, a.alt === null ? null : +a.alt.toFixed(3), a.nAlt, B.conf[i]])];
+  return [+L.x.toFixed(3), +L.y.toFixed(3), +d.toFixed(1), Math.round(B.v.total), hg.ok ? 1 : 0, ...ax.map((a, i) => [a.s === null ? null : +a.s.toFixed(3), a.nA, a.nB, a.alt === null ? null : +a.alt.toFixed(3), a.nAlt, B.conf[i]]),
+    wk ? [+wk.dist.toFixed(3), +wk.h.toFixed(1), wk.n, +wk.span.toFixed(1)] : null, +ls.frac.toFixed(2), ls.added.map(w => [w.j, +w.D.toFixed(2), w.sup])];
 }
 function turnTick(t0, theta, kept) {      // log only
   if (!TURN) TURN = { secs: new Set(), E: [] };
@@ -754,22 +873,34 @@ function turnTick(t0, theta, kept) {      // log only
   if (TURN.secs.size < 12) return null;
   const E = TURN.E; TURN = null;
   if (E.length < 60) return null;
-  const B = relocalize(E), h1 = relocalize(E.slice(0, E.length >> 1)), h2 = relocalize(E.slice(E.length >> 1));
+  const here = [SLM.x, SLM.y];
+  const B = relocalize(E, here, 0.5), h1 = relocalize(E.slice(0, E.length >> 1), here, 0.5), h2 = relocalize(E.slice(E.length >> 1), here, 0.5);
   const half = Math.abs(h1.d - h2.d), ok = B.v.total >= TC_SUP && Math.abs(B.d) < TC_MAXD && half <= TC_HALF;
   const shift = B.v.ax.map((a, i) => B.conf[i] === 'both' && a.s !== null ? a.s - axisNow(i) : 0);
   if (ok && Math.max(...shift.map(Math.abs)) > 0.15 && !MOVE)
     MOVEMSG = { until: performance.now() + 10000, text: `Looks like you moved about ${(100 * Math.hypot(...shift)).toFixed(0)} cm. Before moving, tap Pause to move; after, Resume here and turn once.` };
   return [+B.d.toFixed(1), Math.round(B.v.total), +half.toFixed(1), ok ? 1 : 0, ...shift.map(v => +v.toFixed(3)), ...B.conf];
 }
+function drawPieces(sc) {    // extra wall pieces (room frame): drawn over the length they're known to cover
+  for (const w of XW) {
+    const n = nrmJ(w.j), t = tngJ(w.j), [lo, hi] = wallBounds(w), h0 = Math.min(...w.heard), h1 = Math.max(...w.heard);
+    const a = Math.max(lo, h0 - 0.6), b = Math.min(hi, h1 + 0.6);
+    const p1 = [w.D * n[0] + a * t[0], w.D * n[1] + a * t[1]], p2 = [w.D * n[0] + b * t[0], w.D * n[1] + b * t[1]];
+    // orange = a wall piece learned from another spot (dashed until a second spot confirms it)
+    actx.save(); actx.strokeStyle = 'rgba(255,150,30,0.95)'; actx.lineWidth = 4;
+    if (w.spots < 2) actx.setLineDash([12, 5]);
+    actx.beginPath(); actx.moveTo(CX + p1[0] * sc, CY - p1[1] * sc); actx.lineTo(CX + p2[0] * sc, CY - p2[1] * sc); actx.stroke(); actx.restore();
+  }
+}
 // Two taps (user feedback 2026-11-18: "I moved" read as already done, and "Cancel move" as throwing work away; also the
 // old flow mixed what was heard while walking into the new sweep): Pause to move -> walk (nothing used) -> Resume here
 // -> one full turn is collected -> matched to the room. Tapping Pause to move again during the turn starts over.
 $('moved').onclick = () => {
   if (!SLM) { MOVEMSG = { until: performance.now() + 6000, text: 'Turn all the way round first, so the room box can lock. Then tap Pause to move before you walk.' }; return; }
-  if (MOVE && MOVE.phase === 'paused') { MOVE.phase = 'sweep'; $('moved').textContent = 'Pause to move'; logEv('move-resume'); return; }
-  MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], spot: 1 }; $('moved').textContent = 'Resume here'; logEv('move-pause');
+  if (MOVE && MOVE.phase === 'paused') { MOVE.walkEst = walkEstimate(MOVE.walk); MOVE.phase = 'sweep'; $('moved').textContent = 'Pause to move'; logEv('move-resume', { walk: MOVE.walkEst }); return; }
+  MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], walk: [], walkEst: null, spot: 1 }; $('moved').textContent = 'Resume here'; logEv('move-pause');
 };
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; if ($('moved')) $('moved').textContent = 'Pause to move'; }
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
 // D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
@@ -853,9 +984,11 @@ const SL_GATE = 0.05, SL_VMAX = 0.7, SL_GMAX = 0.8, SL_SR2 = 0.02 * 0.02, SL_QS 
 // consistently, and this rule made 67-99 cm false jumps in same-spot sweeps (sim walks: 18 -> 3 cm median error).
 let SLM = null, UPH = [], wkUntil = 0, wkRms = 0;
 function slLock(f) {
-  SLM = { rot: f.rot, D: f.D.slice(), sup: f.votes.slice(), clutter: Math.max(1, f.clutter), x: 0, y: 0, Pa: 1e-4, Pb: 0, Pc: 1e-4,
+  XW = []; SPOTS = 1;
+  SLM = { wb: [0, 1, 2, 3].map(() => ({ heard: [0], miss: [] })), rot: f.rot, D: f.D.slice(), sup: f.votes.slice(), clutter: Math.max(1, f.clutter), x: 0, y: 0, Pa: 1e-4, Pb: 0, Pc: 1e-4,
     t: null, lastax: [0, 0], pend: [[], []], used: 0, rej: 0, rp: [[], []], acc: [[], []], lastWalk: -1e9, snaps: 0,
     N: [0, 1].map(a => { const r = (f.rot + 90 * a) * Math.PI / 180; return [Math.sin(r), Math.cos(r)]; }) };
+  if (!SLM.wb) SLM.wb = [0, 1, 2, 3].map(() => ({ heard: [0], miss: [] }));
 }
 // Walking path OFF in v1 (plan 2026-11-18): it never triggered on the phone (bounce rms <= 0.5 vs 0.7), and if it did
 // trigger on arm sweeps it would widen the gates and allow recovery jumps (67-99 cm false jumps standing). Moving between
@@ -941,7 +1074,14 @@ function drawRoomBox(maxR, ox = 0, oy = 0) {
   const sc = RPX / maxR, L = [0, 1, 2, 3].map(w => { const a = (f.rot + 90 * w) * Math.PI / 180; return [Math.sin(a), Math.cos(a), f.D[w]]; });
   const corner = (i, j) => { const [ax, ay, ad] = L[i], [bx, by, bd] = L[j], det = ax * by - ay * bx; return [(ad * by - ay * bd) / det, (ax * bd - ad * bx) / det]; };
   for (let w = 0; w < 4; w++) {
-    const c1 = corner((w + 3) % 4, w), c2 = corner(w, (w + 1) % 4), strong = f.votes[w] > 2 * f.clutter;
+    let c1 = corner((w + 3) % 4, w), c2 = corner(w, (w + 1) % 4); const strong = f.votes[w] > 2 * f.clutter;
+    if (SLM && SLM.wb) {   // clip to where this wall is known to exist (it can end, e.g. at the opening of an L)
+      const [lo, hi] = wallBounds(SLM.wb[w]), t = tngJ(w), tc = q => t[0] * q[0] + t[1] * q[1];
+      const a = tc(c1), b = tc(c2), A = Math.max(Math.min(a, b), lo), B = Math.min(Math.max(a, b), hi);
+      if (A >= B) continue;
+      const at = u => { const k = (u - a) / (b - a); return [c1[0] + k * (c2[0] - c1[0]), c1[1] + k * (c2[1] - c1[1])]; };
+      const q1 = at(a < b ? A : B), q2 = at(a < b ? B : A); c1 = q1; c2 = q2;
+    }
     actx.save(); actx.strokeStyle = strong ? 'rgba(240,200,60,0.95)' : 'rgba(220,80,60,0.85)'; actx.lineWidth = strong ? 4 : 2;
     if (!strong) actx.setLineDash([8, 6]);
     actx.beginPath(); actx.moveTo(CX + c1[0] * sc, CY - c1[1] * sc); actx.lineTo(CX + c2[0] * sc, CY - c2[1] * sc); actx.stroke(); actx.restore();
@@ -1056,7 +1196,7 @@ function renderMap(maxR) {
   if (straight) drawWalls(maxR);
   actx.restore();
   if ($('roombox').value === 'on') { actx.save(); actx.translate(ox, oy); drawRoomBox(maxR, ox, oy); actx.restore(); }
-  actx.save(); actx.translate(ox, oy); foDrawGood(sc0); actx.restore();   // green = good face-on readings collected
+  actx.save(); actx.translate(ox, oy); foDrawGood(sc0); if (SLM && XW.length) drawPieces(sc0); actx.restore();   // green = good face-on readings collected
   foDrawLive(sc0);                                                        // amber = focus here (you are near square-on)
   if (MOVE) moveDrawLive(sc0);
 }
@@ -1066,7 +1206,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 live move';
+const APP_BUILD = '2026-11-18 room shape';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -1830,7 +1970,7 @@ function frame(binM, binS, t0) {
       if (mapMode) {
         const pgNew = MOVE ? null : pgTick(t0, theta, kept), keptAll = kept;
         let rbNew = false, slNew = false, slRow = null, tcRow = null, mvRow = null;
-        if (MOVE && MOVE.phase === 'paused') FO.live = null;                     // walking: nothing heard is used
+        if (MOVE && MOVE.phase === 'paused') { FO.live = null; MOVE.walk.push([t0 / 1000, theta, keptAll.map(q => q.r)]); }   // walking: only the measured walk uses it
         else if (MOVE) mvRow = moveTick(t0, theta, keptAll.filter(q => !isGhost(q.r, theta)), mk, mR);   // new spot: kept aside until you're found
         else { const kept = keptAll.filter(q => !isGhost(q.r, theta));   // push-found ghosts left out
         foTick(t0, theta, kept); if (FO.flash && !FO.flash.tw) FO.flash.tw = performance.now();
@@ -1838,7 +1978,7 @@ function frame(binM, binS, t0) {
         if ($('roombox').value === 'on') {
           for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); }
           if (RBOX.h.length > RB_N) { const k = RBOX.h.length - RB_N; for (const a of ['h', 'r', 'px', 'py']) RBOX[a].splice(0, k); }
-          if (RBOX.h.length >= 200 && t0 - RBOX.last > 1000 && !(SLM && slWalking(performance.now()))) {
+          if (RBOX.h.length >= 200 && t0 - RBOX.last > 1000 && !(SLM && slWalking(performance.now())) && SPOTS === 1) {
             // after the lock the rotation stays fixed: refitting it from drifting gyro headings made the box follow the drift
             RBOX.fit = roomFit(SLM ? SLM.rot : null); RBOX.last = t0; rbNew = true;
             if (!SLM) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; } }
@@ -1878,7 +2018,7 @@ function frame(binM, binS, t0) {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
-      const mvTxt = MOVE ? (MOVE.phase === 'paused' ? 'Paused for moving: walk to the new spot, then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
+      const mvTxt = MOVE ? (MOVE.phase === 'paused' ? 'Paused: point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
       $('status').textContent = mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
@@ -1967,7 +2107,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none]]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes]]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
