@@ -954,3 +954,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - "Quiet tones + pilots" hidden (code kept); a saved setting pointing at it falls back to the default.
   - A one-line description under the Ping menu says what the selected sound is. Internal values unchanged, so logs and
     settings keep working.
+- **Loud walk test (build "loud walk test"):** while paused for moving on Inaudible chirps, the sound switches to
+  Full-range chirps at half amplitude, 2 clicks/s; at Resume the walk's raw audio is saved (raw_walk_N.wav, last
+  40 s; logged in the move-resume event) and the sound returns to inaudible for the turn. Stop / Clear restore the
+  settings. Map, room and position are kept across the switches.
+  - **Bug in the previous build "raw 40 s":** a `//` comment inserted mid-line commented out a `} catch`, so the page
+    script failed to load. Fixed here. Lesson: load-check the page in the browser harness after every edit, before
+    installing.

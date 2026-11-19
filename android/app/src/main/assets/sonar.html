@@ -895,10 +895,32 @@ function drawPieces(sc) {    // extra wall pieces (room frame): drawn over the l
 // Two taps (user feedback 2026-11-18: "I moved" read as already done, and "Cancel move" as throwing work away; also the
 // old flow mixed what was heard while walking into the new sweep): Pause to move -> walk (nothing used) -> Resume here
 // -> one full turn is collected -> matched to the room. Tapping Pause to move again during the turn starts over.
+// Loud ticks while walking (test, 2026-11-18): while paused for moving, if you were on Inaudible chirps, the sound
+// switches to Full-range chirps at half amplitude, 2 clicks/s (audible 2-8 kHz spreads sideways: side / back walls).
+// At Resume the walk's raw audio is saved (raw_walk_N.wav, last 40 s) and the sound goes back to inaudible for the turn.
+// Map, room and position are kept across both switches (restart with keep).
+let MOVE_LOUD = null, MOVE_RAWN = 0;
+const LOUD_PING = 'wide', LOUD_RATE = '2', LOUD_AMP = 0.5;
+function loudRestore(restart) {
+  if (!MOVE_LOUD) return;
+  $('ping').value = MOVE_LOUD.ping; $('rate').value = MOVE_LOUD.rate; MOVE_LOUD = null;
+  if (restart && running) { stop(); start(true); }
+}
 $('moved').onclick = () => {
   if (!SLM) { MOVEMSG = { until: performance.now() + 6000, text: 'Turn all the way round first, so the room box can lock. Then tap Pause to move before you walk.' }; return; }
-  if (MOVE && MOVE.phase === 'paused') { MOVE.walkEst = walkEstimate(MOVE.walk); MOVE.phase = 'sweep'; $('moved').textContent = 'Pause to move'; logEv('move-resume', { walk: MOVE.walkEst }); return; }
-  MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], walk: [], walkEst: null, spot: 1 }; $('moved').textContent = 'Resume here'; logEv('move-pause');
+  if (MOVE && MOVE.phase === 'paused') {
+    MOVE.walkEst = walkEstimate(MOVE.walk); MOVE.phase = 'sweep'; $('moved').textContent = 'Pause to move';
+    let raw = null;
+    if (MOVE_LOUD) { try { if (Native.saveSessionRaw) raw = Native.saveSessionRaw('raw_walk_' + (++MOVE_RAWN) + '.wav', 40); } catch (e) { raw = 'error ' + e.message; } }
+    logEv('move-resume', { walk: MOVE.walkEst, raw });
+    loudRestore(true);
+    return;
+  }
+  MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], walk: [], walkEst: null, spot: 1 };
+  if (running && $('ping').value === 'quietlong') {
+    MOVE_LOUD = { ping: $('ping').value, rate: $('rate').value };
+    $('ping').value = LOUD_PING; $('rate').value = LOUD_RATE; stop(); start(true);
+  } $('moved').textContent = 'Resume here'; logEv('move-pause');
 };
 function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
@@ -1206,7 +1228,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 raw 40 s';
+const APP_BUILD = '2026-11-18 loud walk test';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2018,7 +2040,7 @@ function frame(binM, binS, t0) {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
-      const mvTxt = MOVE ? (MOVE.phase === 'paused' ? 'Paused: point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
+      const mvTxt = MOVE ? (MOVE.phase === 'paused' ? (MOVE_LOUD ? 'Paused (soft audible ticks while you walk): ' : 'Paused: ') + 'point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
       $('status').textContent = mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
@@ -2055,7 +2077,7 @@ async function start(keep) {
   PING_SUB = P.updown ? null : makeSubBands(+$('bands').value || 1, f0, f1);
   MN_TPL = P.lowTo ? PING_LOW : PING; MN_FC = P.lowTo ? (f0 + P.lowTo) / 2 : (P.fc || (f0 + f1) / 2);
   AVG = rate >= 8 ? 3 : rate >= 4 ? 2 : 1;        // keep the display responsive at slow rates
-  const vol = +$('vol').value / 100;               // levels are measured relative to each click's own direct sound,
+  const vol = +$('vol').value / 100 * (MOVE_LOUD ? LOUD_AMP : 1);   // (half amplitude for the loud walking ticks) levels are measured relative to each click's own direct sound,
   if (!keep) { EQW = null; eqFrames = 0; }         // so volume changes sensitivity, not distances or brightness
   let play, loopLen = PERIOD;
   HUM = !!P.hum; HS = !!P.tones;
@@ -2103,7 +2125,7 @@ function saveLog(partial) {
     // last 20 s (40 s for tone modes) of the mics as a 32-bit float WAV (ch1 bottom, ch2 back, ch3 third mic if
     // "Mics recorded: 3"), for checking the processing offline; the result string ends with the channel count
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 40);   // last 40 s (the phone keeps 40 s) in every mode, so a turn + a walk fit (2026-11-18) } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 40); /* last 40 s (the phone keeps 40 s) in every mode, so a turn + a walk fit (2026-11-18) */ } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
@@ -2121,10 +2143,10 @@ function saveLog(partial) {
 function stop() { running = false; loopGen++; Native.sonarStop(); $('go').textContent = 'Start sonar'; }
 // user-initiated stop (button / Back): also hand the media volume back and save the log; restarts for setting
 // changes keep both going
-function stopByUser() { logEv('stop', { by: 'user' }); stop(); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
+function stopByUser() { logEv('stop', { by: 'user' }); stop(); loudRestore(false); saveLog(); try { Native.sonarRestoreVolume(); } catch (e) { } }
 window.onSonarStopped = why => { if (running) logEv('stop', { by: 'system', why: why || 'app paused / left' }); running = false; loopGen++; try { Native.sonarStop(); } catch (e) { } $('go').textContent = 'Start sonar'; if (why) $('status').textContent = why; saveLog(); };
 $('go').onclick = () => running ? stopByUser() : start(false);
-$('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); resetTracks(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; };
+$('clear').onclick = () => { MN_TRACKS = []; resetBG(); CLK = new Map(); resetTracks(); seg++; logEv('clear'); clearAcc(); clearMap(); yaw0 = null; loudRestore(true); };
 $('back').onclick = () => { stopByUser(); try { Native.setReversed(false); } catch (e) { } location.href = 'native.html'; };
 $('range').onchange = () => { clearAcc(); if (running && PINGS[$('ping').value].fill) { stop(); start(true); } };   // sweep length depends on range
 $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
