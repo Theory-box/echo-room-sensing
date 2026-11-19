@@ -909,3 +909,7 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   perfectly correct". Pause 87 s, resume 90 s, match at 116 s (26 s of turning): moved ~1.05 m (axis 0: -1.04 m, one
   wall, alternative -1.38 m logged; axis 1: -0.13 m, both walls), heading not corrected (support 166 < 200). Box at
   the end ~3.5 x 3.7 m.
+- **Two rooms (user, 2026-11-18):** earlier tests were in a smaller room (box ~2.7 x 2.85 m); the last several sessions
+  (at least 20:05, 20:12, 20:19, and probably some of the 18:4x-18:5x ones) are in a larger room, ~3.5 x 3.7 m, which
+  the user confirmed by pushing toward each of the four walls (distances tracked smoothly and looked right). Boxes of
+  ~3.5-3.9 m in those sessions are correct, not errors; check which room a session was in before comparing box sizes.
