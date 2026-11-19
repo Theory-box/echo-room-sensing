@@ -70,7 +70,9 @@
     centre and the room moves around you (walk toward a wall and it comes toward the dot). Walls firm up as more echoes
     back them. Clear starts over.
     <b>Ghost echoes:</b> facing one way, push the phone in and out a few times (5+ cm). Real things in front move with
-    the phone; reflection ghosts and the ceiling stay put and are removed from the map (always on in Map view).</p>
+    the phone; reflection ghosts and the ceiling stay put and are removed from the map (always on in Map view).
+    <b>Dots:</b> amber = you are near square-on to a surface -- sweep slowly back and forth across it, or push in and out.
+    Green = a good reading of that surface was collected; work your way round until the walls have green dots.</p>
   <div id="status" class="mut"></div>
   </div>
 </div>
@@ -542,6 +544,7 @@ function pgTick(t0, theta, kept) {
   for (const tr of T) { const sc = tr.length - 30 * pgMed(tr.map(x => x[1])); if (sc > rs) { rs = sc; ref = tr; } }
   const rmap = new Map(ref), rv = ref.map(x => x[1]);
   if (pgPct(rv, 0.95) - pgPct(rv, 0.05) < PG_PUSH) return null;           // no push happening
+  if (foMark(theta, pgMed(rv), t0, 'push')) FO.log = ['push', +theta.toFixed(1), +pgMed(rv).toFixed(2)];
   const out = [];
   for (const tr of T) {
     if (tr === ref) continue;
@@ -571,7 +574,64 @@ function pgWipe(r, h) {      // remove a newly found ghost from what is already 
   const keep = RBOX.h.map((hh, i) => !(Math.abs(angDiff(hh, h)) < PG_DIR && Math.abs(RBOX.r[i] - r) < 0.05));
   for (const a of ['h', 'r', 'px', 'py']) RBOX[a] = RBOX[a].filter((_, i) => keep[i]);
 }
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; }
+// ---------- Face-on indicator (2026-11-18, always on in Map view) ----------
+// A flat surface answers loudest when you face it squarely. The loudest echo is followed reading to reading (within
+// 4 cm); while it is within 3 dB of the loudest it has been on this pass, an AMBER dot sits on it: "focus here --
+// sweep slowly across, or push in and out". A pass that ends (echo lost, or 8 dB down twice) with >= 10 readings,
+// covering >= 12 deg, its loudest point >= 3 deg inside the pass, is a good face-on reading (an anchor for the
+// direction of that surface): a GREEN dot is left there. A push (>= 5 cm) facing a surface leaves one too.
+// Offline (2026-11-18): quick sweeps gave 0-3 usable passes per session and anchors scattered +-10-16 deg -- slow
+// passes are what's needed; the dot asks for them. Logs: fo = good pass [heading of loudest point, distance m,
+// readings, span deg] or push mark ['push', heading, distance m].
+const FO_GATE = 0.04, FO_MINN = 10, FO_SPAN = 12, FO_EDGE = 3, FO_DROP = 8;
+let FO = { tr: null, good: [], live: null, flash: null, log: null };
+function foMark(h, r, t0, kind) {
+  const th = h * Math.PI / 180, d = r + ARM, x = (SLM ? SLM.x : 0) + d * Math.sin(th), y = (SLM ? SLM.y : 0) + d * Math.cos(th);
+  if (FO.good.some(g => Math.hypot(g.x - x, g.y - y) < 0.1)) return false;
+  FO.good.push({ x, y, t: t0, kind }); FO.flash = { x, y, t: t0 }; return true;
+}
+function foClose(tr, t0) {
+  const P = tr.pts; if (P.length < FO_MINN) return;
+  const h0 = P[0][0], offs = P.map(q => angDiff(q[0], h0)), lo = Math.min(...offs), hi = Math.max(...offs);
+  if (hi - lo < FO_SPAN) return;
+  let best = -1, bo = 0;
+  for (const o of offs) { let sm = 0, n = 0; P.forEach((q, i) => { if (Math.abs(offs[i] - o) <= 3) { sm += Math.pow(10, q[1] / 10); n++; } }); if (sm / n > best) { best = sm / n; bo = o; } }
+  if (bo - lo < FO_EDGE || hi - bo < FO_EDGE) return;
+  const h = h0 + bo, r = pgMed(P.map(q => q[2]));
+  if (foMark(h, r, t0, 'pass')) FO.log = [+h.toFixed(1), +r.toFixed(2), P.length, Math.round(hi - lo)];
+}
+function foTick(t0, theta, kept) {
+  const es = kept.filter(q => q.r > 0.35); let tr = FO.tr;
+  if (tr) {
+    let b = null; for (const q of es) { const dd = Math.abs(q.r - tr.r); if (dd < FO_GATE && (!b || dd < Math.abs(b.r - tr.r))) b = q; }
+    if (b) { tr.pts.push([theta, b.l, b.r]); tr.r = b.r; tr.miss = 0; tr.lmax = Math.max(tr.lmax, b.l); tr.low = b.l < tr.lmax - FO_DROP ? tr.low + 1 : 0; }
+    else tr.miss++;
+    if (tr.miss > 3 || tr.low >= 2) { foClose(tr, t0); FO.tr = tr = null; }
+  }
+  if (!tr && es.length) { const q = es.reduce((a, c) => c.l > a.l ? c : a); FO.tr = tr = { r: q.r, pts: [[theta, q.l, q.r]], miss: 0, lmax: q.l, low: 0 }; }
+  FO.live = null;
+  if (tr && tr.miss === 0 && tr.pts.length >= 3 && tr.pts[tr.pts.length - 1][1] >= tr.lmax - 3) FO.live = { h: theta, r: tr.r };
+}
+function foDrawGood(sc) {
+  for (const g of FO.good) {
+    actx.beginPath(); actx.arc(CX + g.x * sc, CY - g.y * sc, 5, 0, 2 * Math.PI);
+    actx.fillStyle = 'rgba(70,220,110,0.95)'; actx.fill(); actx.lineWidth = 1.5; actx.strokeStyle = 'rgba(0,0,0,0.8)'; actx.stroke();
+  }
+  const f = FO.flash, now = performance.now();
+  if (f && now - f.tw < 1500) {
+    const k = (now - f.tw) / 1500; actx.beginPath(); actx.arc(CX + f.x * sc, CY - f.y * sc, 8 + 22 * k, 0, 2 * Math.PI);
+    actx.lineWidth = 3; actx.strokeStyle = `rgba(70,220,110,${(1 - k).toFixed(2)})`; actx.stroke();
+  }
+}
+function foDrawLive(sc) {
+  const L = FO.live; if (!L) return;
+  const d = L.r + ARM, th = L.h * Math.PI / 180, x = CX + d * Math.sin(th) * sc, y = CY - d * Math.cos(th) * sc;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
+  actx.beginPath(); actx.arc(x, y, 8 + 3 * pulse, 0, 2 * Math.PI);
+  actx.fillStyle = `rgba(255,180,40,${(0.65 + 0.3 * pulse).toFixed(2)})`; actx.fill(); actx.lineWidth = 2; actx.strokeStyle = 'rgba(0,0,0,0.8)'; actx.stroke();
+  actx.fillStyle = 'rgba(255,200,80,0.95)'; actx.font = 'bold 12px sans-serif'; actx.textAlign = 'left'; actx.fillText('slow', x + 13, y + 4);
+}
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
 // D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
@@ -829,6 +889,8 @@ function renderMap(maxR) {
   if (straight) drawWalls(maxR);
   actx.restore();
   if ($('roombox').value === 'on') { actx.save(); actx.translate(ox, oy); drawRoomBox(maxR, ox, oy); actx.restore(); }
+  actx.save(); actx.translate(ox, oy); foDrawGood(sc0); actx.restore();   // green = good face-on readings collected
+  foDrawLive(sc0);                                                        // amber = focus here (you are near square-on)
 }
 
 // ---------- processing ----------
@@ -836,7 +898,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 push ghosts';
+const APP_BUILD = '2026-11-18 face-on dots';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -1601,6 +1663,7 @@ function frame(binM, binS, t0) {
         const pgNew = pgTick(t0, theta, kept), keptAll = kept;
         let rbNew = false, slNew = false, slRow = null;
         { const kept = keptAll.filter(q => !isGhost(q.r, theta));   // push-found ghosts left out
+        foTick(t0, theta, kept); if (FO.flash && !FO.flash.tw) FO.flash.tw = performance.now();
         updateMap(theta, kept, mk, mR); wipeRings(); updateWalls(theta, kept, t0);
         if ($('roombox').value === 'on') {
           for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); }
@@ -1628,7 +1691,7 @@ function frame(binM, binS, t0) {
           if (rbNew && RBOX.fit) { fl.rb = [RBOX.fit.rot, ...RBOX.fit.D.map(v => +v.toFixed(2)), ...RBOX.fit.votes, RBOX.fit.clutter, RBOX.fit.n]; if (RBOX.fit.rings.length) fl.rbr = RBOX.fit.rings; }
           if (slNew) fl.slk = [SLM.rot, ...SLM.D.map(v => +v.toFixed(2)), ...SLM.sup, SLM.clutter];
           if (slRow) fl.sl = slRow;
-          if (pgNew) fl.pg = pgNew; if (PG.ghosts.length) fl.ng = PG.ghosts.length; }
+          if (pgNew) fl.pg = pgNew; if (FO.log) { fl.fo = FO.log; FO.log = null; } if (FO.live) fl.fl = 1; if (PG.ghosts.length) fl.ng = PG.ghosts.length; }
       } else paint(theta, prof, binM, mR, mk);
       if (sonarLog.length >= 6000) saveLog(true);   // long session: save this part and keep going (nothing dropped)
       drawAscan(lev, kept, binM, mR, mk, lastThr);
@@ -1729,7 +1792,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }

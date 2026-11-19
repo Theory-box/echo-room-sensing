@@ -840,3 +840,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   distance +-4 cm, direction +-20 deg) kept off map / room box / tracking and wiped; moves -> real (clears a ghost).
   Sim: ghost found, real surface kept, no ghosts without pushing. Replay on real logs: mostly far echoes flagged, but
   also a few near ones (0.57-0.93 m, 1.58 m) -- unverified. Logs: pg (verdicts), ng (ghosts so far).
+- **Push test, first real use (18:45-18:56):** 80 real verdicts, 3 ghosts (1.95, 3.71, 3.92 m); a 4.32 m far surface
+  moved with the pushes -> real (likely through an opening).
+- **Heading drift:** box rotation fitted on first vs last minute differs 0-7 deg over 2-3 min (one session ~17).
+  Echo-based correction tried twice, no gain: (a) mean offset of wall echoes from the locked normal wanders +-5-10 deg
+  (sweep pattern / beam bias); (b) face-on anchors (loudest point of a pass across a wall): only 0-3 usable passes per
+  session, scattering +-10-16 deg. Not built. Options left: slow passes (more readings each) or the magnetometer as a
+  slow anchor (log it first).
+- **Face-on dots (2026-11-18, always on in Map view):** amber dot on the surface ahead while its echo is near its
+  loudest ("slow" -- sweep slowly or push here); green dot left after a good slow pass (>= 10 readings, >= 12 deg, loudest
+  point inside) or a push. Sim: marks at the right distance; their direction is off up to 8-11 deg even in sim, so they
+  guide coverage but are not yet accurate enough to correct the compass. Logs: fo, fl.
