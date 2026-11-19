@@ -1206,7 +1206,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 mode names';
+const APP_BUILD = '2026-11-18 raw 40 s';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2103,7 +2103,7 @@ function saveLog(partial) {
     // last 20 s (40 s for tone modes) of the mics as a 32-bit float WAV (ch1 bottom, ch2 back, ch3 third mic if
     // "Mics recorded: 3"), for checking the processing offline; the result string ends with the channel count
     let rawInfo = null;
-    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', HUM || HS || PINGS[$('ping').value].mics3 ? 40 : 20); } catch (e) { rawInfo = 'error ' + e.message; }
+    if (!partial) try { if (Native.saveSessionRaw) rawInfo = Native.saveSessionRaw('raw_audio.wav', 40);   // last 40 s (the phone keeps 40 s) in every mode, so a turn + a walk fit (2026-11-18) } catch (e) { rawInfo = 'error ' + e.message; }
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
