@@ -35,8 +35,10 @@ them. Gates: >= 200 explained echoes, |change| <= 8 deg (mod 90), the two halves
 - After the tap: tracking frozen; the spot-2 turn is buffered (readings per spot) and drawn once the pose is found.
 - Relocalisation: a heading search within +-8 deg, then one offset vote per axis against spot 1's echoes. Use both
   walls of an axis when seen, else low confidence + the farthest consistent peak, never beyond the locked width.
-  Mirror ambiguity (only when one wall of an axis is heard): prefer the smaller move and mark that axis low
-  confidence; a full sweep usually hears both walls, which removes it.
+  Mirror ambiguity (only when one wall of an axis is heard): keep BOTH candidate positions for that axis (show the
+  smaller move meanwhile, marked low confidence). Later spots settle it: a spot that hears both walls of the axis,
+  returning near an earlier spot (the loop must close), or furniture seen from several spots that must land in one
+  place. The earlier spot's stored readings are then re-placed and redrawn.
 - Tests: offline split-half noise floor (expect ~0), fake shifts recovered (incl. one wall deleted); live loop
   closure (spot 1 -> 2 -> 1 within 10 cm) and a taped 60 cm move.
 
