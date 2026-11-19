@@ -31,7 +31,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">I moved</button></div>
+  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button></div>
   <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
@@ -73,9 +73,9 @@
     the phone; reflection ghosts and the ceiling stay put and are removed from the map (always on in Map view).
     <b>Dots:</b> amber = you are near square-on to a surface -- sweep slowly back and forth across it, or push in and out.
     Green = a good reading of that surface was collected; work your way round until the walls have green dots.
-    <b>More spots:</b> once the room is locked, tap <b>I moved</b>, step somewhere else in the room (stay ~0.8 m from the
-    walls), then turn all the way round once. The app finds where you went and which way you face from the walls, and
-    adds that sweep to the map. Tap again to cancel.</p>
+    <b>More spots:</b> once the room is locked, tap <b>Pause to move</b> (mapping pauses), walk anywhere in the room (stay
+    about an arm's length from the walls), tap <b>Resume here</b>, then turn all the way round once. The app finds where you
+    are from the walls and adds that sweep to the map. Nothing you have mapped is lost.</p>
   <div id="status" class="mut"></div>
   </div>
 </div>
@@ -640,7 +640,7 @@ function foDrawLive(sc) {
   actx.fillStyle = `rgba(255,180,40,${(0.65 + 0.3 * pulse).toFixed(2)})`; actx.fill(); actx.lineWidth = 2; actx.strokeStyle = 'rgba(0,0,0,0.8)'; actx.stroke();
   actx.fillStyle = 'rgba(255,200,80,0.95)'; actx.font = 'bold 12px sans-serif'; actx.textAlign = 'left'; actx.fillText('slow', x + 13, y + 4);
 }
-// ---------- More spots: "I moved" + relocalisation; per-turn heading check (plan v1, 2026-11-18) ----------
+// ---------- More spots: "Pause to move" / "Resume here" + relocalisation; per-turn heading check (plan v1, 2026-11-18) ----------
 // After the tap, nothing is drawn or tracked; the next full turn is kept aside. When it is complete (all 12 directions,
 // >= 100 confirmed echoes), the locked room box finds where you are: for each heading correction d (-8..+8 deg), each
 // pair of opposite walls votes on your offset along its axis (distance to wall A and to wall B must agree with the fixed
@@ -650,7 +650,7 @@ function foDrawLive(sc) {
 // Per-turn heading check (log only): each full turn while standing, the same vote; accepted if >= 200 echoes back it,
 // the correction is inside +-8 deg, and the two halves of the turn agree within 12 deg (offline: per-turn rotation
 // spread 0.5-1.5 deg with >= ~200 echoes; halves differ 2-10 deg on good turns, 16-44 on bad ones -- tuned on the
-// same 21 turns, so it is only logged for now). If both walls of an axis say you moved > 15 cm, a hint suggests "I moved".
+// same 21 turns, so it is only logged for now). If both walls of an axis say you moved > 15 cm, a hint suggests pausing to move next time.
 let MOVE = null, HCORR = 0, MOVEMSG = null, TURN = null, MAGYAW = null;
 const MV_NEED = 100, TC_SUP = 200, TC_HALF = 12, TC_MAXD = 8;
 function relocVote(E, d) {
@@ -723,7 +723,7 @@ function moveTick(t0, theta, kept, mk, mR) {
   MOVEMSG = { until: performance.now() + 15000, text: `Found you: moved ${(100 * Math.hypot(L.x - ox, L.y - oy)).toFixed(0)} cm` +
     (Math.abs(d) >= 0.5 ? `, heading corrected ${d > 0 ? '+' : ''}${d.toFixed(1)}°` : '') + ` (one way: ${ct(0)}; other way: ${ct(1)})` +
     (near !== null && near < 0.8 ? `. A wall is only ${near.toFixed(2)} m away: step toward the middle (very close walls get filtered out).` : '') };
-  M.spot++; MOVE = null; $('moved').textContent = 'I moved';
+  M.spot++; MOVE = null; $('moved').textContent = 'Pause to move';
   return [+L.x.toFixed(3), +L.y.toFixed(3), +d.toFixed(1), Math.round(B.v.total), hg.ok ? 1 : 0, ...ax.map((a, i) => [a.s === null ? null : +a.s.toFixed(3), a.nA, a.nB, a.alt === null ? null : +a.alt.toFixed(3), a.nAlt, B.conf[i]])];
 }
 function turnTick(t0, theta, kept) {      // log only
@@ -737,15 +737,18 @@ function turnTick(t0, theta, kept) {      // log only
   const half = Math.abs(h1.d - h2.d), ok = B.v.total >= TC_SUP && Math.abs(B.d) < TC_MAXD && half <= TC_HALF;
   const shift = B.v.ax.map((a, i) => B.conf[i] === 'both' && a.s !== null ? a.s - axisNow(i) : 0);
   if (ok && Math.max(...shift.map(Math.abs)) > 0.15 && !MOVE)
-    MOVEMSG = { until: performance.now() + 10000, text: `Looks like you moved about ${(100 * Math.hypot(...shift)).toFixed(0)} cm. If so: tap I moved and turn round once.` };
+    MOVEMSG = { until: performance.now() + 10000, text: `Looks like you moved about ${(100 * Math.hypot(...shift)).toFixed(0)} cm. Before moving, tap Pause to move; after, Resume here and turn once.` };
   return [+B.d.toFixed(1), Math.round(B.v.total), +half.toFixed(1), ok ? 1 : 0, ...shift.map(v => +v.toFixed(3)), ...B.conf];
 }
+// Two taps (user feedback 2026-11-18: "I moved" read as already done, and "Cancel move" as throwing work away; also the
+// old flow mixed what was heard while walking into the new sweep): Pause to move -> walk (nothing used) -> Resume here
+// -> one full turn is collected -> matched to the room. Tapping Pause to move again during the turn starts over.
 $('moved').onclick = () => {
-  if (MOVE) { MOVE = null; $('moved').textContent = 'I moved'; logEv('move-cancel'); MOVEMSG = { until: performance.now() + 4000, text: 'Move cancelled.' }; return; }
-  if (!SLM) { MOVEMSG = { until: performance.now() + 6000, text: 'Turn all the way round first, so the room box can lock. Then tap I moved before stepping.' }; return; }
-  MOVE = { secs: new Set(), E: [], buf: [], spot: 1 }; $('moved').textContent = 'Cancel move'; logEv('moved');
+  if (!SLM) { MOVEMSG = { until: performance.now() + 6000, text: 'Turn all the way round first, so the room box can lock. Then tap Pause to move before you walk.' }; return; }
+  if (MOVE && MOVE.phase === 'paused') { MOVE.phase = 'sweep'; $('moved').textContent = 'Pause to move'; logEv('move-resume'); return; }
+  MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], spot: 1 }; $('moved').textContent = 'Resume here'; logEv('move-pause');
 };
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; if ($('moved')) $('moved').textContent = 'I moved'; }
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; if ($('moved')) $('moved').textContent = 'Pause to move'; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
 // D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
@@ -835,7 +838,7 @@ function slLock(f) {
 }
 // Walking path OFF in v1 (plan 2026-11-18): it never triggered on the phone (bounce rms <= 0.5 vs 0.7), and if it did
 // trigger on arm sweeps it would widen the gates and allow recovery jumps (67-99 cm false jumps standing). Moving between
-// spots will be an explicit "I moved" step instead. Bounce rms is still computed and logged.
+// spots is an explicit Pause to move / Resume here step instead. Bounce rms is still computed and logged.
 const SL_WALK_ON = false;
 function slWalking(now) { return SL_WALK_ON && now < wkUntil; }
 function slRefit(f) {   // f was fitted with the locked rotation: same wall numbering, only distances / support change
@@ -1041,7 +1044,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 more spots';
+const APP_BUILD = '2026-11-18 pause to move';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -1805,7 +1808,8 @@ function frame(binM, binS, t0) {
       if (mapMode) {
         const pgNew = MOVE ? null : pgTick(t0, theta, kept), keptAll = kept;
         let rbNew = false, slNew = false, slRow = null, tcRow = null, mvRow = null;
-        if (MOVE) mvRow = moveTick(t0, theta, keptAll.filter(q => !isGhost(q.r, theta)), mk, mR);   // new spot: kept aside until you're found
+        if (MOVE && MOVE.phase === 'paused') FO.live = null;                     // walking: nothing heard is used
+        else if (MOVE) mvRow = moveTick(t0, theta, keptAll.filter(q => !isGhost(q.r, theta)), mk, mR);   // new spot: kept aside until you're found
         else { const kept = keptAll.filter(q => !isGhost(q.r, theta));   // push-found ghosts left out
         foTick(t0, theta, kept); if (FO.flash && !FO.flash.tw) FO.flash.tw = performance.now();
         updateMap(theta, kept, mk, mR); wipeRings(); updateWalls(theta, kept, t0);
@@ -1836,7 +1840,7 @@ function frame(binM, binS, t0) {
         if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; }
           if (rbNew && RBOX.fit) { fl.rb = [RBOX.fit.rot, ...RBOX.fit.D.map(v => +v.toFixed(2)), ...RBOX.fit.votes, RBOX.fit.clutter, RBOX.fit.n]; if (RBOX.fit.rings.length) fl.rbr = RBOX.fit.rings; }
           if (slNew) fl.slk = [SLM.rot, ...SLM.D.map(v => +v.toFixed(2)), ...SLM.sup, SLM.clutter];
-          if (slRow) fl.sl = slRow; if (tcRow) fl.tk = tcRow; if (mvRow) fl.mv = mvRow; if (MOVE) fl.mov = MOVE.secs.size;
+          if (slRow) fl.sl = slRow; if (tcRow) fl.tk = tcRow; if (mvRow) fl.mv = mvRow; if (MOVE) fl.mov = MOVE.phase === 'paused' ? -1 : MOVE.secs.size;
           if (HCORR) fl.hc = +HCORR.toFixed(1); if (MAGYAW !== null) fl.my = +MAGYAW.toFixed(1);
           if (pgNew) fl.pg = pgNew; if (FO.log) { fl.fo = FO.log; FO.log = null; } if (FO.live) fl.fl = 1; if (PG.ghosts.length) fl.ng = PG.ghosts.length; }
       } else paint(theta, prof, binM, mR, mk);
@@ -1852,7 +1856,7 @@ function frame(binM, binS, t0) {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
-      const mvTxt = MOVE ? `New spot: turn all the way round once (${MOVE.secs.size} of 12 directions). ` : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
+      const mvTxt = MOVE ? (MOVE.phase === 'paused' ? 'Paused for moving: walk to the new spot, then tap Resume here. ' : `New spot: turn all the way round once (${MOVE.secs.size} of 12 directions). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
       $('status').textContent = mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
@@ -1941,7 +1945,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = new-spot sweep in progress (directions covered of 12); mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none]]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none]]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }

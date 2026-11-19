@@ -887,3 +887,10 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
 - **Hum while moving between spots (user's idea): not built.** Phase tracking under-read real motion earlier; with
   several reflectors, path changes don't add up to one movement; errors would likely exceed the +-10-20 cm a sweep
   gives. Revisit only if ambiguous axes are common in real two-spot tests (the heading at set-off is a cheaper fix).
+- **First two-spot test (20:05):** the flow failed on wording. The user tapped "I moved", started turning, then
+  tapped again ("Cancel move") at 6 of 12 directions, so the second spot was drawn as if still at spot 1. The logged
+  turn check (311 s) noticed: a ~62 cm move along one axis, both walls, accepted. Replaying that turn through the
+  relocalisation gives ~77 cm (both walls) / ~18 cm (one wall), heading +5.5 deg (trusted: 353 echoes, halves 5 deg).
+  The box drifted after the lock (a wall 0.70 -> 1.69 m at 92 s; final ~3.7 x 3.4 m vs the usual 2.7 x 2.85).
+- **Fix (build "pause to move"):** two taps -- Pause to move (nothing heard while walking is used) -> Resume here ->
+  one full turn -> matched to the room. Nothing mapped is ever discarded.

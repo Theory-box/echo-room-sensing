@@ -14,7 +14,7 @@ try{
   yawAt = t => { const y=SIM.yawF((t-base)/1000+1/10); return ((y%360)+540)%360-180; };
   let i=0; for(;i<300;i++) frame(binM,binS,base+i*100);
   const lockRot=SLM?SLM.rot:null, p1=SLM?[SLM.x,SLM.y]:null;
-  $('moved').onclick(); moved=true; tMove=i/10;
+  $('moved').onclick(); moved=true; tMove=i/10; for(let k=0;k<20;k++,i++) frame(binM,binS,base+i*100); $('moved').onclick(); tMove=i/10;
   let found=null; for(;i<520;i++){ frame(binM,binS,base+i*100); const f=sonarLog[sonarLog.length-1]; if(f.mv){found=f.mv;break;} }
   // truth in the app frame: sim heading 0 = app heading -yaw0-ish; use the locked box rotation to map: app = sim rotated by (lockRot - 0)
   const a=lockRot*Math.PI/180, tx=dx*Math.cos(a)-dy*Math.sin(a)*-1, ty=dy*Math.cos(a)+dx*Math.sin(a)*-1;
