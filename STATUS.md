@@ -894,3 +894,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   The box drifted after the lock (a wall 0.70 -> 1.69 m at 92 s; final ~3.7 x 3.4 m vs the usual 2.7 x 2.85).
 - **Fix (build "pause to move"):** two taps -- Pause to move (nothing heard while walking is used) -> Resume here ->
   one full turn -> matched to the room. Nothing mapped is ever discarded.
+- **Second two-spot test (20:12):** Pause/Resume used correctly, but the user stopped at 10 of 12 directions, so the
+  match never ran and nothing was shown during the turn (looked dead); the second spot was drawn from the first spot's
+  position. The gyro stayed within 1-2.5 deg of the compass over the session, and box rotations fitted from clockwise
+  vs anticlockwise turning showed no consistent lag, so the ~20 deg misalignment the user saw at spot 2 is the
+  position error (near walls seen from the wrong spot look rotated), not drift.
+  - Replay with the new rule: a match at 122.6 s, ~1.01 m moved (user: ~3 ft), one wall per axis (less sure).
+- **Fix (build "live move"):**
+  - the match runs at 9 of 12 directions;
+  - the new turn's echoes are drawn live in cyan around you, with a 12-sector coverage ring;
+  - status: "keep turning (n of 9 directions needed)".
+  - Sim at 9 sectors: still within ~5 cm, more often one-wall.
