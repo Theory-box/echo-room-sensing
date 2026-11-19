@@ -1003,3 +1003,18 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - Forward slide = distance walked; side-wall catches (room known) = drift. Same machinery for all three; the app
     could take a checkpoint automatically whenever you pause and swing mid-walk.
   - Test: one walk of each kind in the same room, compare.
+- **Build "ghosts + furniture check" (from the brainstorm):**
+  - **Learned bounce ghosts.** Each stored room-box echo carries a flag "equals the sum of two other echoes in its
+    reading (or twice one)". The room fit drops a distance in a wall direction when >= 40% of >= 10 echoes there are
+    flagged (track level; per-reading chance ~1-2%).
+    - Real replays: flags 0.3-3.8% of echoes; dropped one 0.81 m ghost in 20:49.
+    - Little visible change in that room (the 2.5 m bounce never decided a wall; the 4.95 m surface is real).
+  - **Furniture check after a move.** Clutter (non-wall echoes) from earlier spots is stored as room points; this
+    turn's clutter is scored at the found spot and 8 positions 0.5 m around. If the furniture is informative
+    (best - worst >= 10 points) and fits another spot >= 10 points better, the app asks for one more turn, then
+    accepts with a warning.
+    - Real replays: 20:19 and 20:49 accepted (found = best); 21:45 (loud test, one axis had no wall) flagged:
+      furniture fits 0.5 m off better.
+    - Sims: no false rejects. ~40-70 ms on PC.
+  - **Not built (not confident):** choosing 1.45 vs 1.05 m as the wall in the larger room's busy direction (1.45 m
+    heard in only ~15% of readings there, the 4.95 m in ~85%). Needs the user's description / the lift test.
