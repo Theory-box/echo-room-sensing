@@ -905,3 +905,7 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - the new turn's echoes are drawn live in cyan around you, with a 12-sector coverage ring;
   - status: "keep turning (n of 9 directions needed)".
   - Sim at 9 sectors: still within ~5 cm, more often one-wall.
+- **Third two-spot test (20:19, build "live move"): worked.** User: "it updated the map, and everything appeared
+  perfectly correct". Pause 87 s, resume 90 s, match at 116 s (26 s of turning): moved ~1.05 m (axis 0: -1.04 m, one
+  wall, alternative -1.38 m logged; axis 1: -0.13 m, both walls), heading not corrected (support 166 < 200). Box at
+  the end ~3.5 x 3.7 m.
