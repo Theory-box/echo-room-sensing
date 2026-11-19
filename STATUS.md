@@ -851,3 +851,30 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   loudest ("slow" -- sweep slowly or push here); green dot left after a good slow pass (>= 10 readings, >= 12 deg, loudest
   point inside) or a push. Sim: marks at the right distance; their direction is off up to 8-11 deg even in sim, so they
   guide coverage but are not yet accurate enough to correct the compass. Logs: fo, fl.
+- **Plan v1 implemented (2026-11-18, build "more spots"):**
+  - **Audit fixes:**
+    - moves-with-you needs the same echo to stay put through the move (chain), and its evidence expires;
+    - push ghosts only apply within 30 cm of where they were found;
+    - wall lines are in the room frame;
+    - the Room box toggle clears the map;
+    - the face-on pass is capped at 200 readings;
+    - SLM.acc is trimmed;
+    - the push window is restricted to the current steady stretch;
+    - the walking path is off (SL_WALK_ON = false).
+  - **Box rotation frozen after lock** (refit with that rotation, distances only).
+  - **Box vetoes rings:** echoes a locked wall explains within +-65 deg of its normal don't count toward a ring. On
+    logs: clean sessions unchanged, 18:48 bogus 4.60 m wall -> 1.48 m; messy sessions (Mid / moved) shift. Ceiling at
+    a wall's distance (~1.3 m) can't be separated.
+  - **"I moved" button (Map view, Room box On):**
+    - the next full turn is kept aside;
+    - relocalisation is a heading search (+-8) plus one offset vote per axis using both walls (fixed width);
+    - the heading correction is applied only with >= 200 echoes and the halves agreeing within 12 deg, else none;
+    - the kept sweep is then drawn from the new spot;
+    - a warning shows if a wall is < 0.8 m away.
+    - Sim: moves of 43-50 cm recovered within 1-4 cm (one wall missing -> "less sure"); the heading from one turn
+      was unreliable (~50 echoes), so it was gated off.
+    - Real logs, no move: a later turn relocalised 1-21 cm off (typically 5-15), so expect +-10-20 cm for now.
+  - **Per-turn heading check:** log only (tk), with a "looks like you moved" hint.
+  - **Magnetometer heading** logged (my).
+  - **Not yet:** re-placing an earlier spot when a later one settles an ambiguous axis (the alternative is only
+    logged in mv); wipeRings centred where the ring was painted.

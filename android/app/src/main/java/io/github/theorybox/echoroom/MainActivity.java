@@ -64,6 +64,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     private final float[] rotMat = new float[9];
     private final float[] orient = new float[3];
     private volatile float yawDeg = 0f;
+    private volatile float magYawDeg = Float.NaN;   // compass heading (magnetometer-based), logged as a reference only
+    private final float[] rotMatM = new float[9], orientM = new float[3];
     private volatile float gyroMag = 0f;
     private final float[] gravity = new float[3];
     // phone acceleration (gravity removed) turned into the room's horizontal frame (east, north) with the same rotation
@@ -322,7 +324,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onResume() {
         super.onResume();
         paused = false;
-        int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY, Sensor.TYPE_LINEAR_ACCELERATION};
+        int[] types = {Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GRAVITY, Sensor.TYPE_LINEAR_ACCELERATION, Sensor.TYPE_ROTATION_VECTOR};
         for (int t : types) {
             Sensor s = sm.getDefaultSensor(t);
             if (s != null) sm.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME);
@@ -354,6 +356,11 @@ public class MainActivity extends Activity implements SensorEventListener {
                 yawDeg = (float) Math.toDegrees(orient[0]);
                 yawNs = e.timestamp;
                 rotOK = true;
+                break;
+            case Sensor.TYPE_ROTATION_VECTOR:
+                SensorManager.getRotationMatrixFromVector(rotMatM, e.values);
+                SensorManager.getOrientation(rotMatM, orientM);
+                magYawDeg = (float) Math.toDegrees(orientM[0]);
                 break;
             case Sensor.TYPE_LINEAR_ACCELERATION:
                 if (!rotOK) break;
@@ -659,7 +666,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         @JavascriptInterface public String orientation() {
             // non-finite sensor values would make invalid JSON (and break every sonar frame): send 0 instead
             float ya = yawNs > 0 ? (android.os.SystemClock.elapsedRealtimeNanos() - yawNs) / 1e6f : 0f;
-            return "{\"yaw\":" + fin(yawDeg) + ",\"ya\":" + fin(ya) + ",\"gyro\":" + fin(gyroMag)
+            return "{\"yaw\":" + fin(yawDeg) + ",\"ya\":" + fin(ya) + ",\"gyro\":" + fin(gyroMag) + ",\"my\":" + (Float.isNaN(magYawDeg) ? "null" : fin(magYawDeg))
                     + ",\"g\":[" + fin(gravity[0]) + "," + fin(gravity[1]) + "," + fin(gravity[2]) + "]}";
         }
 
