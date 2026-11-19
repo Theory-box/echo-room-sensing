@@ -1058,3 +1058,16 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
       surfaces.
   - The plain wall's 1.25 vs 1.5 m (low vs high) is still unexplained: objects to the left and right inside the
     beam, or the arm reaching farther when low.
+- **Self-contained Test button (build "test: next buttons"):**
+  - Always visible; separate from normal use. Pressing it saves your settings, sets Inaudible chirps / Map view /
+    room box on / a fresh map, starts the sonar and guides you; at the end the log is saved and your settings come
+    back. "End test" cancels (also restores).
+  - Steps: positioning steps wait for a tap on Next (the Test button turns into Next); sweep steps finish by
+    themselves when all 12 directions are covered (+ room locked for the first). The voice reads each full
+    instruction.
+  - Every reading carries the step (ts); events test-start / test-step / test-next / test-done.
+  - Current plan, high + low sweep:
+    1. stand, phone at head height -> Next;
+    2. turn once (room locks from this sweep only);
+    3. crouch, phone at knee height -> Next;
+    4. turn once (recorded but kept OUT of the room box).

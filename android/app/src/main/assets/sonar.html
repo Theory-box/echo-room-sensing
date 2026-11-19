@@ -31,7 +31,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn" style="display:none">Test</button></div>
+  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button><button class="alt" id="testend" style="display:none">End test</button></div>
   <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
@@ -975,31 +975,71 @@ $('moved').onclick = () => {
     $('ping').value = LOUD_PING; $('rate').value = LOUD_RATE; stop(); start(true);
   } $('moved').textContent = 'Resume here'; logEv('move-pause');
 };
-// ---------- Test button (user idea, 2026-11-18): a guided test plan shipped with each build ----------
-// Press Test (sonar running): the steps appear in the status line with a countdown and advance by themselves; every
-// step is marked in the log (event test-step) so the analysis knows exactly what was done when. Press Test again to stop.
-const TEST_PLAN = { name: 'lift test', steps: [
-  { s: 6, t: 'Face the HALF WALL squarely. Phone at KNEE height, pointing at it. Hold still.' },
-  { s: 7, t: 'Now LIFT slowly, straight up, to HEAD height (keep pointing ahead).' },
-  { s: 5, t: 'Hold still at HEAD height.' },
-  { s: 6, t: 'Turn to face a PLAIN full wall (nothing in front of it). Phone at KNEE height. Hold still.' },
-  { s: 7, t: 'LIFT slowly to HEAD height.' },
-  { s: 5, t: 'Hold still at HEAD height.' },
-  { s: 0, t: 'Test done. Press Stop when you like (the log is saved then).' },
+// ---------- Test button (user idea, 2026-11-18): a self-contained guided test shipped with each build ----------
+// Always visible. Pressing it saves your settings, sets up what the test needs (Inaudible chirps, Map view, room box
+// on, fresh map), starts the sonar and guides you step by step (status line + short spoken prompt). Steps advance by
+// themselves: timed steps by countdown, sweep steps once all 12 directions are covered (and, if asked, the room has
+// locked). Every step is marked in the log (test-start / test-step / test-done) and every reading carries the step
+// (ts). At the end the log is saved and your settings come back. Press Test again to cancel (also restores settings).
+// User feedback 2026-11-18: positioning steps wait for a tap on Next (no timers), and the voice reads the whole
+// instruction. Sweep steps finish by themselves (all directions covered, + room locked if asked); Next ends one early.
+// Current plan: HIGH then LOW sweep (2026-11-18 lift test: a half wall answers only when the phone is level with it).
+const TEST_PLAN = { name: 'high + low sweep', steps: [
+  { k: 'confirm', t: 'Stand up straight. Hold the phone at about HEAD height, level, pointing out in front of you. Tap Next when you are ready.' },
+  { k: 'sweep', need: 12, lock: true, max: 150, t: 'Keep the phone at head height and turn slowly all the way round. It moves on by itself when done.' },
+  { k: 'confirm', t: 'Now crouch or bend so the phone is at KNEE height, level, pointing out. Tap Next when you are ready.' },
+  { k: 'sweep', need: 12, noBox: true, max: 150, t: 'Keep the phone at knee height and turn slowly all the way round. It moves on by itself when done.' },
 ] };
 let TEST = null;
-function testTick() {
-  if (!TEST) return '';
-  const now = performance.now(), st = TEST_PLAN.steps[TEST.i];
-  if (st.s && now - TEST.t0 >= st.s * 1000 && TEST.i < TEST_PLAN.steps.length - 1) { TEST.i++; TEST.t0 = now; logEv('test-step', { plan: TEST_PLAN.name, step: TEST.i }); try { Native.say && Native.say(TEST_PLAN.steps[TEST.i].t.split('.')[0]); } catch (e) { } }
-  const cur = TEST_PLAN.steps[TEST.i], left = cur.s ? Math.max(0, Math.ceil(cur.s - (now - TEST.t0) / 1000)) : 0;
-  return `TEST ${TEST.i + 1}/${TEST_PLAN.steps.length}${left ? ' (' + left + ' s)' : ''}: ${cur.t} `;
+function testSay(t) { try { Native.say && Native.say(t); } catch (e) { } }
+function testStep(i) {
+  TEST.i = i; TEST.t0 = performance.now(); TEST.secs = new Set();
+  logEv(i === 0 ? 'test-start' : 'test-step', { plan: TEST_PLAN.name, step: i, kind: TEST_PLAN.steps[i].k });
+  testSay(TEST_PLAN.steps[i].t.replace(/ It moves on by itself when done\./, '').replace(/HEAD|KNEE/g, m => m.toLowerCase()));
+  $('testbtn').textContent = 'Next';
 }
-$('testbtn').onclick = () => {
-  if (TEST) { TEST = null; logEv('test-stop', { plan: TEST_PLAN.name }); return; }
-  if (!running || !SLM) { $('status').textContent = 'Start the sonar and turn until the room locks, then press Test.'; return; }
-  TEST = { i: 0, t0: performance.now() }; logEv('test-start', { plan: TEST_PLAN.name, step: 0 });
-  try { Native.say && Native.say(TEST_PLAN.steps[0].t.split('.')[0]); } catch (e) { }
+function testFinish(why) {
+  const T = TEST; if (!T) return;
+  TEST = null;
+  logEv(why === 'done' ? 'test-done' : 'test-cancel', { plan: TEST_PLAN.name });
+  if (running) stopByUser();                       // saves the log
+  for (const [k, v] of Object.entries(T.saved)) { if ($(k)) $(k).value = v; }
+  buildSens(T.saved.sens); buildView(T.saved.dirf); showViewHelp();
+  $('testbtn').textContent = 'Test'; $('testend').style.display = 'none';
+  const msg = why === 'done' ? 'Test complete: log saved, your settings are back. Plug in the phone when you can.' : 'Test cancelled: your settings are back.';
+  MOVEMSG = { until: performance.now() + 60000, text: msg }; $('status').textContent = msg;   // (MOVEMSG keeps it on the status line)
+  if (why === 'done') testSay('Test complete');
+}
+function testTick(theta) {      // called every reading while the sonar runs; returns the status-line text
+  if (!TEST) return '';
+  const st = TEST_PLAN.steps[TEST.i], now = performance.now(), secs = (now - TEST.t0) / 1000;
+  let done = false, prog = '';
+  if (st.k === 'sweep') {
+    TEST.secs.add(secOf(theta));
+    done = TEST.secs.size >= st.need && (!st.lock || !!SLM);
+    if (secs > st.max) done = true;
+    prog = `${TEST.secs.size} of ${st.need} directions` + (st.lock && TEST.secs.size >= st.need && !SLM ? ', waiting for the room to lock: keep turning' : '');
+  } else if (st.k === 'confirm') { done = !!TEST.next; prog = 'tap Next'; }
+  else { done = secs >= st.s; prog = `${Math.max(0, Math.ceil(st.s - secs))} s`; }
+  if (TEST.next) { done = true; TEST.next = false; }
+  if (done) {
+    if (TEST.i + 1 < TEST_PLAN.steps.length) testStep(TEST.i + 1);
+    else { testFinish('done'); return ''; }
+  }
+  const cur = TEST_PLAN.steps[TEST.i];
+  if (done) prog = cur.k === 'sweep' ? `0 of ${cur.need} directions` : cur.k === 'confirm' ? 'tap Next' : `${cur.s} s`;   // just moved on
+  return `TEST ${TEST.i + 1}/${TEST_PLAN.steps.length} (${prog}): ${cur.t} `;
+}
+$('testend').onclick = () => { if (TEST) testFinish('cancel'); };
+$('testbtn').onclick = async () => {
+  if (TEST) { TEST.next = true; logEv('test-next', { step: TEST.i }); return; }   // during a test this button is Next
+  const saved = {}; for (const k of ['ping', 'rate', 'dirf', 'roombox', 'sens', 'walls']) if ($(k)) saved[k] = $(k).value;
+  if (running) stopByUser();
+  $('ping').value = 'quietlong'; buildSens(); buildView('map'); $('dirf').value = 'map'; $('roombox').value = 'on'; showViewHelp();
+  TEST = { i: 0, t0: 0, secs: new Set(), saved, next: false };
+  $('testbtn').textContent = 'Next'; $('testend').style.display = '';
+  await start(false);
+  if (TEST) testStep(0);
 };
 function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], sf: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
@@ -1329,7 +1369,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 lift test';
+const APP_BUILD = '2026-11-18 test: next buttons';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2100,7 +2140,8 @@ function frame(binM, binS, t0) {
         updateMap(theta, kept, mk, mR); wipeRings(); updateWalls(theta, kept, t0);
         if ($('roombox').value === 'on') {
           const rsK = kept.map(q => q.r);
-          for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); RBOX.sf.push(sumFlag(q.r, rsK)); }
+          const testNoBox = TEST && TEST_PLAN.steps[TEST.i] && TEST_PLAN.steps[TEST.i].noBox;   // low sweep: not part of the room box
+          if (!testNoBox) for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); RBOX.sf.push(sumFlag(q.r, rsK)); }
           if (RBOX.h.length > RB_N) { const k = RBOX.h.length - RB_N; for (const a of ['h', 'r', 'px', 'py', 'sf']) RBOX[a].splice(0, k); }
           if (RBOX.h.length >= 200 && t0 - RBOX.last > (SPOTS > 1 ? 3000 : 1000) && !(SLM && slWalking(performance.now())) && !MOVE) {
             // after the lock the rotation stays fixed: refitting it from drifting gyro headings made the box follow the drift
@@ -2127,7 +2168,7 @@ function frame(binM, binS, t0) {
           if (rbNew && RBOX.ghosts) { fl.rbg = RBOX.ghosts; RBOX.ghosts = null; }
           if (rbNew && RBOX.fit) { fl.rb = [RBOX.fit.rot, ...RBOX.fit.D.map(v => +v.toFixed(2)), ...RBOX.fit.votes, RBOX.fit.clutter, RBOX.fit.n]; if (RBOX.fit.rings.length) fl.rbr = RBOX.fit.rings; }
           if (slNew) fl.slk = [SLM.rot, ...SLM.D.map(v => +v.toFixed(2)), ...SLM.sup, SLM.clutter];
-          if (slRow) fl.sl = slRow; if (tcRow) fl.tk = tcRow; if (mvRow) fl.mv = mvRow; if (MOVE) fl.mov = MOVE.phase === 'paused' ? -1 : MOVE.secs.size;
+          if (slRow) fl.sl = slRow; if (TEST) fl.ts = TEST.i; if (tcRow) fl.tk = tcRow; if (mvRow) fl.mv = mvRow; if (MOVE) fl.mov = MOVE.phase === 'paused' ? -1 : MOVE.secs.size;
           if (HCORR) fl.hc = +HCORR.toFixed(1); if (MAGYAW !== null) fl.my = +MAGYAW.toFixed(1);
           if (pgNew) fl.pg = pgNew; if (FO.log) { fl.fo = FO.log; FO.log = null; } if (FO.live) fl.fl = 1; if (PG.ghosts.length) fl.ng = PG.ghosts.length; }
       } else paint(theta, prof, binM, mR, mk);
@@ -2143,9 +2184,9 @@ function frame(binM, binS, t0) {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
-      $('testbtn').style.display = (mapMode && SLM) || TEST ? '' : 'none';   // the test needs the locked room
+      const ttTxt = testTick(theta);
       const mvTxt = MOVE ? (MOVE.phase === 'paused' ? (MOVE_LOUD ? 'Paused (soft audible ticks while you walk): ' : 'Paused: ') + 'point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
-      $('status').textContent = testTick() + mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
+      $('status').textContent = ttTxt + mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
 
@@ -2233,7 +2274,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
