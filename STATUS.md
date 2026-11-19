@@ -961,3 +961,18 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - **Bug in the previous build "raw 40 s":** a `//` comment inserted mid-line commented out a `} catch`, so the page
     script failed to load. Fixed here. Lesson: load-check the page in the browser harness after every edit, before
     installing.
+- **Loud walk test (21:45):**
+  - **Problems with the test itself:**
+    - the walk raw audio was NOT saved ("no session": the session folder only exists after the log is saved at Stop);
+    - the test REPLACED the inaudible chirps with loud ones while walking (only 2 readings/s), so the user lost the
+      steady wall-ahead reading. A design flaw of the test, not a tracking bug.
+  - **From the log (23 loud readings over 12.6 s):**
+    - each click gave ~5 echoes spread over 1.3-4.7 m;
+    - the wall ahead was matched in 8 (it visibly shrinks 2.15 -> 1.30 m);
+    - side walls in 6 (several of them ambiguous, coinciding with other predicted surfaces);
+    - most echoes are unassigned.
+  - **Verdict:** loud ticks hear much more, but at 2/s and with this room model the side-wall evidence is weak and
+    ambiguous -- not worth building on now.
+  - **Lock problem in this room:** in one direction there are steady surfaces at ~1.0-1.1, ~1.4-1.5, ~2.5 and
+    ~4.9-5.0 m from the usual first spot (all 3 sessions). The box takes the most-voted one, and this time it was the
+    4.95 m surface seen through an opening (the room came out too long). In the previous session it settled on 1.21 m.
