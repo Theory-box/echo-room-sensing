@@ -1043,3 +1043,18 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     body when held low (posture changes the arm length), which would shift every distance.
   - **Inconclusive without the user's description:** distance / height of the half wall; whether the arm reached
     farther when low.
+- **Lift test -- resolved with the user's info** (half wall ~2-3 ft = 0.6-0.9 m from the user, ~0.35-0.65 m from
+  the phone):
+  - The raw profile at 0.5-0.9 m facing it: knee -42 dB, lifting -40..-46, head -49..-69 (a 10-25 dB drop).
+    Control (plain wall direction): -50..-53 at all heights.
+  - So the half-wall signature is exactly as predicted (answers when level with it, quiet above it), and at head
+    height the surfaces beyond it appear (~1.1-1.3, ~1.6-1.7 m).
+  - The app barely DETECTED it (7-9 echoes): inside / at the edge of the 0.6 m near zone treated as phone clutter.
+  - The ~1.05 m surface in the busy direction from the usual first spot is very likely this half wall; the room
+    continues beyond.
+  - **Implications:**
+    - two-height sweeps (low = half walls / low furniture, high = full walls and what's beyond) are justified;
+    - close half walls need either standing farther away or a near-zone rule that keeps strong height-dependent
+      surfaces.
+  - The plain wall's 1.25 vs 1.5 m (low vs high) is still unexplained: objects to the left and right inside the
+    beam, or the arm reaching farther when low.
