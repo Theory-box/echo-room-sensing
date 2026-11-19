@@ -43,7 +43,7 @@
   <div class="row">
     <label>Range <select id="range"><option value="3">3 m</option><option value="5" selected>5 m</option><option value="7">7 m</option></select></label>
     <label>Clicks/s <select id="rate"><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="15">15</option></select></label>
-    <label>Ping <select id="ping"><option value="strong">Strong (audible)</option><option value="mid">Mid (8–16 kHz)</option><option value="quietlong" selected>Quiet (long) – inaudible</option><option value="wide">Full sweep 2–22 kHz (audible, test)</option><option value="quiettones">Quiet tones (experiment)</option><option value="quietpilots">Quiet tones + pilots (experiment)</option></select></label>
+    <label>Ping <select id="ping"><option value="quietlong" selected>Inaudible chirps (16–22 kHz) – recommended</option><option value="strong">Low chirps (2–12 kHz, audible)</option><option value="mid">High chirps (8–16 kHz, faintly audible)</option><option value="wide">Full-range chirps (2–22 kHz, audible)</option><option value="quiettones">Inaudible chord – all pitches at once (16–22 kHz, compare)</option></select></label><div id="pingdesc" class="hint" style="font-size:12px;opacity:0.8;margin:2px 0 6px"></div>
   </div>
   <div class="row">
     <label>View <select id="dirf"><option value="full" selected>Full (dim = unsure)</option><option value="clean">Clean (ahead only)</option><option value="map">Map (keeps echoes, cleans up as you turn)</option></select></label>
@@ -1206,7 +1206,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 room shape';
+const APP_BUILD = '2026-11-18 mode names';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2131,8 +2131,18 @@ $('mask').onchange = $('sens').onchange = () => { clearAcc(); clearMap(); };
 // Only show the settings the chosen mode actually uses (2026-11-18): Clicks/s not for the tone modes / Hum (they set
 // their own pace) or modes with a fixed rate; Pitch bands only for click modes; Hum records only, so no view/range/
 // sensitivity/near-zone settings; Walls + Room box only in Map view.
+// One line under the Ping menu saying what the selected sound is (names changed 2026-11-18 with the user; the
+// "Quiet tones + pilots" mode is hidden, code kept)
+const PING_DESC = {
+  quietlong: 'A rising glide each click, too high for most people to hear. Best for mapping: the room features are tuned on this one.',
+  strong: 'A short rising glide each click, low pitches: clearly audible, spreads the widest.',
+  mid: 'A short rising glide each click, higher pitches: faintly audible, a narrower beam than Low.',
+  wide: 'A long glide over every pitch: the sharpest distances and hears corners best, but you will hear it.',
+  quiettones: 'Every pitch at once, nonstop (like a held chord), too high to hear. Kept for comparing with Inaudible chirps.',
+};
 function showViewHelp() {
   const P = PINGS[$('ping').value] || {}, show = (id, on) => { const l = $(id).closest('label'); if (l) l.style.display = on ? '' : 'none'; };
+  if ($('pingdesc')) $('pingdesc').textContent = PING_DESC[$('ping').value] || '';
   show('rate', !(P.tones || P.hum || P.rate));
   show('bands', !(P.tones || P.hum || P.updown));
   for (const id of ['range', 'sens', 'mask', 'dirf']) show(id, !P.hum);

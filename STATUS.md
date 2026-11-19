@@ -945,3 +945,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - **Box sizes in this room across sessions:** one axis 3.69 / 3.97 / 3.74 / 3.74 m, consistent; the other
     2.71 / 2.98 / 2.96 earlier vs 3.75 today -- one wall of that pair differs by ~0.8 m (a near surface ~0.6-0.8 m
     in earlier sessions vs 1.21 m today). User says the room is roughly square, which favours today's 3.75 x 3.74.
+- **Ping modes renamed (2026-11-18, with the user):**
+  - Inaudible chirps (16-22 kHz), recommended [quietlong]
+  - Low chirps (2-12 kHz, audible) [strong]
+  - High chirps (8-16 kHz, faintly audible) [mid]
+  - Full-range chirps (2-22 kHz, audible) [wide]
+  - Inaudible chord, all pitches at once (16-22 kHz, compare) [quiettones]
+  - "Quiet tones + pilots" hidden (code kept); a saved setting pointing at it falls back to the default.
+  - A one-line description under the Ping menu says what the selected sound is. Internal values unchanged, so logs and
+    settings keep working.
