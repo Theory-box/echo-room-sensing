@@ -995,3 +995,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   3. **Automatic step detection** (walking toward a wall = an implicit Pause/Resume), with "walk this way" lanes.
   4. **Furniture vs walls, openings as gaps, two-height layers, tracking from all known walls across the beam.**
   5. **A Test button** that carries a ready-made test plan in each build.
+- **Next: sideways tracking while moving, inaudible only (user ideas, 2026-11-18 night).** Side walls are only heard
+  when the phone faces them (+-30 deg for a clean wall echo), so make the walk include that:
+  - (a) a wide wobble while walking (+-60-90 deg);
+  - (b) 2-4 short stop-and-swing checkpoints between A and B;
+  - (c) a straight walk (current).
+  - Forward slide = distance walked; side-wall catches (room known) = drift. Same machinery for all three; the app
+    could take a checkpoint automatically whenever you pause and swing mid-walk.
+  - Test: one walk of each kind in the same room, compare.
