@@ -31,7 +31,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button></div>
+  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn" style="display:none">Test</button></div>
   <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
@@ -979,10 +979,10 @@ $('moved').onclick = () => {
 // Press Test (sonar running): the steps appear in the status line with a countdown and advance by themselves; every
 // step is marked in the log (event test-step) so the analysis knows exactly what was done when. Press Test again to stop.
 const TEST_PLAN = { name: 'lift test', steps: [
-  { s: 6, t: 'Face the busy direction (where the half wall / opening is). Phone at KNEE height, pointing ahead. Hold still.' },
+  { s: 6, t: 'Face the HALF WALL squarely. Phone at KNEE height, pointing at it. Hold still.' },
   { s: 7, t: 'Now LIFT slowly, straight up, to HEAD height (keep pointing ahead).' },
   { s: 5, t: 'Hold still at HEAD height.' },
-  { s: 6, t: 'Turn to face a PLAIN wall. Phone at KNEE height. Hold still.' },
+  { s: 6, t: 'Turn to face a PLAIN full wall (nothing in front of it). Phone at KNEE height. Hold still.' },
   { s: 7, t: 'LIFT slowly to HEAD height.' },
   { s: 5, t: 'Hold still at HEAD height.' },
   { s: 0, t: 'Test done. Press Stop when you like (the log is saved then).' },
@@ -997,7 +997,7 @@ function testTick() {
 }
 $('testbtn').onclick = () => {
   if (TEST) { TEST = null; logEv('test-stop', { plan: TEST_PLAN.name }); return; }
-  if (!running) { $('status').textContent = 'Start sonar first, then press Test.'; return; }
+  if (!running || !SLM) { $('status').textContent = 'Start the sonar and turn until the room locks, then press Test.'; return; }
   TEST = { i: 0, t0: performance.now() }; logEv('test-start', { plan: TEST_PLAN.name, step: 0 });
   try { Native.say && Native.say(TEST_PLAN.steps[0].t.split('.')[0]); } catch (e) { }
 };
@@ -1329,7 +1329,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 refine + test button';
+const APP_BUILD = '2026-11-18 lift test';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2143,6 +2143,7 @@ function frame(binM, binS, t0) {
       $('bar').firstElementChild.style.width = nd === null ? '0' : Math.max(3, 100 * (1 - nd / mR)) + '%';
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
+      $('testbtn').style.display = (mapMode && SLM) || TEST ? '' : 'none';   // the test needs the locked room
       const mvTxt = MOVE ? (MOVE.phase === 'paused' ? (MOVE_LOUD ? 'Paused (soft audible ticks while you walk): ' : 'Paused: ') + 'point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
       $('status').textContent = testTick() + mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
