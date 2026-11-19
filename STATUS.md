@@ -1018,3 +1018,15 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     - Sims: no false rejects. ~40-70 ms on PC.
   - **Not built (not confident):** choosing 1.45 vs 1.05 m as the wall in the larger room's busy direction (1.45 m
     heard in only ~15% of readings there, the 4.95 m in ~85%). Needs the user's description / the lift test.
+- **Build "refine + test button":**
+  - **"2 possible spots" that are furniture.** In all three real two-spot tests the alternative came from one wall
+    seen with a second parallel surface ~0.3 m in front of it (at spot 2: ~1.0 and ~1.35 m), and the app had
+    already picked the farther one (the one agreeing with the box). Rule: an alternative that means "the nearer
+    surface on the same side is the wall" (within 0.6 m) is not an ambiguity (walls are opaque) -> no "unsure".
+    Genuine cases (L-room, one 20:49 axis) still say unsure.
+  - **Walls refined from later spots.** After a move the box refits every 3 s from all spots' echoes (position
+    corrected), each wall only within +-15 cm of its current distance, so it sharpens but can't jump to another
+    surface. L-room sim: walls unchanged (no capture by the leg's walls); box-room moves unchanged.
+  - **Test button.** Shows a guided plan in the status line with countdowns, speaks each step, logs test-start /
+    test-step / test-stop. Current plan = lift test (busy direction: knee 6 s, lift 7 s, head 5 s; then the same
+    facing a plain wall).

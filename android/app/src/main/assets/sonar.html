@@ -31,7 +31,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button></div>
+  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button></div>
   <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
@@ -748,7 +748,15 @@ function relocalize(E, prior = null, sig = 1.0) {   // prior: [x, y] expected po
 }
 function confOf(B) {
   B.conf = B.v.ax.map(a => a.nA >= 6 && a.nB >= 6 ? 'both' : Math.max(a.nA, a.nB) >= 6 ? 'one' : 'none');
-  B.amb = B.v.ax.map((a, i) => a.alt !== null && B.conf[i] === 'one' && a.nAlt >= 0.7 * a.score);
+  // Offline (3 real two-spot tests, 2026-11-18): every "2 possible spots" came from one wall seen with a second parallel
+  // surface ~0.3 m in front of it (furniture / half wall). The alternative = treating the NEARER surface as the wall.
+  // A wall is opaque, so if the farther one is heard too, the nearer one is partial: not a real ambiguity.
+  // Wall on the + side (A, j < 2): nearer surface -> larger offset; on the - side (B): nearer -> smaller offset.
+  B.amb = B.v.ax.map((a, i) => {
+    if (!(a.alt !== null && B.conf[i] === 'one' && a.nAlt >= 0.7 * a.score)) return false;
+    const plusSide = a.nA >= a.nB, nearerAlt = plusSide ? a.alt > a.s : a.alt < a.s;
+    return !(nearerAlt && Math.abs(a.alt - a.s) < 0.6);
+  });
   return B;
 }
 // heading from one turn is only trusted with the per-turn gates (sim 2026-11-18: with ~50 echoes a turn gave -3 for a
@@ -967,6 +975,32 @@ $('moved').onclick = () => {
     $('ping').value = LOUD_PING; $('rate').value = LOUD_RATE; stop(); start(true);
   } $('moved').textContent = 'Resume here'; logEv('move-pause');
 };
+// ---------- Test button (user idea, 2026-11-18): a guided test plan shipped with each build ----------
+// Press Test (sonar running): the steps appear in the status line with a countdown and advance by themselves; every
+// step is marked in the log (event test-step) so the analysis knows exactly what was done when. Press Test again to stop.
+const TEST_PLAN = { name: 'lift test', steps: [
+  { s: 6, t: 'Face the busy direction (where the half wall / opening is). Phone at KNEE height, pointing ahead. Hold still.' },
+  { s: 7, t: 'Now LIFT slowly, straight up, to HEAD height (keep pointing ahead).' },
+  { s: 5, t: 'Hold still at HEAD height.' },
+  { s: 6, t: 'Turn to face a PLAIN wall. Phone at KNEE height. Hold still.' },
+  { s: 7, t: 'LIFT slowly to HEAD height.' },
+  { s: 5, t: 'Hold still at HEAD height.' },
+  { s: 0, t: 'Test done. Press Stop when you like (the log is saved then).' },
+] };
+let TEST = null;
+function testTick() {
+  if (!TEST) return '';
+  const now = performance.now(), st = TEST_PLAN.steps[TEST.i];
+  if (st.s && now - TEST.t0 >= st.s * 1000 && TEST.i < TEST_PLAN.steps.length - 1) { TEST.i++; TEST.t0 = now; logEv('test-step', { plan: TEST_PLAN.name, step: TEST.i }); try { Native.say && Native.say(TEST_PLAN.steps[TEST.i].t.split('.')[0]); } catch (e) { } }
+  const cur = TEST_PLAN.steps[TEST.i], left = cur.s ? Math.max(0, Math.ceil(cur.s - (now - TEST.t0) / 1000)) : 0;
+  return `TEST ${TEST.i + 1}/${TEST_PLAN.steps.length}${left ? ' (' + left + ' s)' : ''}: ${cur.t} `;
+}
+$('testbtn').onclick = () => {
+  if (TEST) { TEST = null; logEv('test-stop', { plan: TEST_PLAN.name }); return; }
+  if (!running) { $('status').textContent = 'Start sonar first, then press Test.'; return; }
+  TEST = { i: 0, t0: performance.now() }; logEv('test-start', { plan: TEST_PLAN.name, step: 0 });
+  try { Native.say && Native.say(TEST_PLAN.steps[0].t.split('.')[0]); } catch (e) { }
+};
 function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], sf: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
@@ -1023,7 +1057,10 @@ function ringFree(h, r, px = null, py = null, sf = null) {
   for (let i = 0; i < h.length; i++) if (!ring.has(Math.round(r[i] / 0.03))) { H.push(h[i]); Rr.push(r[i]); if (px) { X.push(px[i]); Y.push(py[i]); } if (sf) SF.push(sf[i]); }
   return { h: H, r: Rr, px: px ? X : null, py: px ? Y : null, sf: sf ? SF : null, rings: [...ring].sort((x, y) => x - y).map(b => +(b * 0.03).toFixed(2)) };
 }
-function roomFit(rotFixed = null) {   // rotFixed: after the lock, only the wall distances are refitted
+// near: after a move (2+ spots), each wall may only be refined within +-REFINE_WIN of its current distance, so
+// echoes from all spots sharpen it but other surfaces (an L's inner walls, furniture) can't capture it.
+const REFINE_WIN = 0.15;
+function roomFit(rotFixed = null, near = null) {   // rotFixed: after the lock, only the wall distances are refitted
   const rf = ringFree(RBOX.h, RBOX.r, RBOX.px, RBOX.py, RBOX.sf), h = rf.h, r = rf.r, PX = rf.px, PY = rf.py, SF = rf.sf, n = h.length, nb = Math.round((RB_MAX - RB_MIN) / 0.01), win = Math.round(RB_TOL / 0.01);
   let best = null;
   for (let rot = rotFixed === null ? -45 : rotFixed; rot < (rotFixed === null ? 45 : rotFixed + 1); rot++) {
@@ -1044,7 +1081,7 @@ function roomFit(rotFixed = null) {   // rotFixed: after the lock, only the wall
       let run = 0, bi = 0, bv = -1;   // count within +-win bins of each bin (sliding window)
       for (let b = 0; b < nb + win; b++) {
         if (b < nb) run += hist[b]; if (b - 2 * win - 1 >= 0) run -= hist[b - 2 * win - 1];
-        const c = b - win; if (c >= 0 && c < nb && run > bv) { bv = run; bi = c; }
+        const c = b - win; if (c >= 0 && c < nb && run > bv && (!near || Math.abs(RB_MIN + c * 0.01 - near[w]) <= REFINE_WIN)) { bv = run; bi = c; }
       }
       D.push(RB_MIN + bi * 0.01); votes.push(bv); tot += bv;
     }
@@ -1292,7 +1329,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 ghosts + furniture check';
+const APP_BUILD = '2026-11-18 refine + test button';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2065,9 +2102,9 @@ function frame(binM, binS, t0) {
           const rsK = kept.map(q => q.r);
           for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); RBOX.sf.push(sumFlag(q.r, rsK)); }
           if (RBOX.h.length > RB_N) { const k = RBOX.h.length - RB_N; for (const a of ['h', 'r', 'px', 'py', 'sf']) RBOX[a].splice(0, k); }
-          if (RBOX.h.length >= 200 && t0 - RBOX.last > 1000 && !(SLM && slWalking(performance.now())) && SPOTS === 1) {
+          if (RBOX.h.length >= 200 && t0 - RBOX.last > (SPOTS > 1 ? 3000 : 1000) && !(SLM && slWalking(performance.now())) && !MOVE) {
             // after the lock the rotation stays fixed: refitting it from drifting gyro headings made the box follow the drift
-            RBOX.fit = roomFit(SLM ? SLM.rot : null); RBOX.last = t0; rbNew = true;
+            RBOX.fit = roomFit(SLM ? SLM.rot : null, SLM && SPOTS > 1 ? SLM.D : null); RBOX.last = t0; rbNew = true;
             if (!SLM) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; } }
             else slRefit(RBOX.fit);   // the locked room keeps improving from every echo (each corrected for where you stood)
           }
@@ -2107,7 +2144,7 @@ function frame(binM, binS, t0) {
       const ptTxt = PT && ptUsed && PINGS[$('ping').value].pilots ? `, phone moved ${(1000 * PT.cum).toFixed(1)} mm (sound)` : '';
       $('moved').style.display = mapMode && $('roombox').value === 'on' ? '' : 'none';
       const mvTxt = MOVE ? (MOVE.phase === 'paused' ? (MOVE_LOUD ? 'Paused (soft audible ticks while you walk): ' : 'Paused: ') + 'point the phone where you are going and walk slowly (small side-to-side waves are fine), then tap Resume here. ' : `New spot: keep turning (${MOVE.secs.size} of ${MV_SECS} directions needed; cyan = what this turn hears). `) : (MOVEMSG && performance.now() < MOVEMSG.until ? MOVEMSG.text + ' ' : '');
-      $('status').textContent = mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
+      $('status').textContent = testTick() + mvTxt + (mapMode ? `map: turned through ${30 * popc(covered)}° of 360°, ` + (PG.ghosts.length ? `${PG.ghosts.length} ghost echo${PG.ghosts.length > 1 ? 'es' : ''} removed (push test), ` : '') : '') + `heading ${Math.round(theta)}°, ${(performance.now() - t0).toFixed(0)} ms/frame` + (UD && PINGS[$('ping').value].eq ? (EQW ? ', sweep balanced' : ', measuring speaker…') : '') + (quietDir ? '' : `, mic check ${directLag > 3 ? 'OK' : 'CHECK'} (${directLag.toFixed(1)})`) + ptTxt;
     }
 }
 
