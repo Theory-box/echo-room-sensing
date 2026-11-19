@@ -1100,3 +1100,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   Plays silence, asks for 3 mics, keeps the last 120 s (native ring length now settable, `setRingSeconds`, 10-180 s),
   logs heading/motion every 0.1 s like the Hum logger, saves raw_audio.wav at Stop. The raw save now streams to the
   file in 1 s pieces instead of building the whole WAV in memory.
+- Time-reversal "private sound spot" test (parked): PC right speaker played 3x6 audible chirps (2-7 kHz, 60 ms), phone
+  in Record only on the bed, bottom mic facing the speaker. Response learned cleanly (18 chirps, repeats 0.87-0.99
+  similar), but the spot was acoustically dead (90 % of energy within 31 ms, direct sound dominant). Predicted focus:
+  +14 dB over an equal-energy chirp at the bottom mic, +6 dB at the back mic a few cm away. By ear the focused sound
+  sounded the same everywhere in the room. Likely causes: too few echoes (direct path dominates), the listener's head
+  disturbing a 3-8 cm focus, speaker mix-ups during the session. Next try: a spot with no line of sight to the speaker,
+  measured with the phone (measure.py) instead of by ear. Scripts in analysis/time_reversal/; the playback page is the
+  "Sound Focus Bench" artifact.
