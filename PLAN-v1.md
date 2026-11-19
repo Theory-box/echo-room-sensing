@@ -29,12 +29,14 @@ them. Gates: >= 200 explained echoes, |change| <= 8 deg (mod 90), the two halves
 2-10, bad 16-44; tuned on the same 21 turns -> keep logging, revisit).
 
 ## 5-7. Two-spot guided flow (replaces walking detection)
-- Full turn -> face each wall once -> push at the amber dots -> arrow to a spot 50-70 cm away and >= 0.8 m from every
-  wall -> tap "I moved" -> turn -> result with a confidence per axis.
+- Full sweep (face each wall once, push at the amber dots) -> tap "I moved" -> step in a direction YOU choose (no
+  suggested direction: the app can't know what's walkable) -> full sweep -> result with a confidence per axis.
+- The app warns after the second sweep if a wall is closer than ~0.8 m (the near-zone filter would eat it).
 - After the tap: tracking frozen; the spot-2 turn is buffered (readings per spot) and drawn once the pose is found.
 - Relocalisation: a heading search within +-8 deg, then one offset vote per axis against spot 1's echoes. Use both
   walls of an axis when seen, else low confidence + the farthest consistent peak, never beyond the locked width.
-  Mirror ambiguity resolved by the move direction at the tap.
+  Mirror ambiguity (only when one wall of an axis is heard): prefer the smaller move and mark that axis low
+  confidence; a full sweep usually hears both walls, which removes it.
 - Tests: offline split-half noise floor (expect ~0), fake shifts recovered (incl. one wall deleted); live loop
   closure (spot 1 -> 2 -> 1 within 10 cm) and a taped 60 cm move.
 
@@ -44,7 +46,6 @@ them. Gates: >= 200 explained echoes, |change| <= 8 deg (mod 90), the two halves
 - Furniture vs walls: label echoes against the specular wall model, then a furniture layer; plane vs point from two
   spots.
 - Openings drawn as gaps (the 4.32 m surface that moved with pushes is a candidate).
-- Suggesting the next spot.
 - Applying the compass continuously.
 - Refining room widths from later spots.
 
