@@ -878,3 +878,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - **Magnetometer heading** logged (my).
   - **Not yet:** re-placing an earlier spot when a later one settles an ambiguous axis (the alternative is only
     logged in mv); wipeRings centred where the ring was painted.
+- **Body echo (user's idea: measure the phone-to-body distance from the echo off the body), raw audio, 3 sessions:**
+  - **Front mic:** a smooth decay of the phone's own ringing (-29 dB at 10 cm to -50 dB at 58 cm re direct), no bump at
+    25-45 cm, very steady (click-to-click sd < 1 dB).
+  - **Back mic:** the near range varies a lot (sd 4-6 dB) and has small session-dependent bumps (e.g. 31-37 cm), so
+    something near it changes (hand/body?), but there is no clean, repeatable body peak to read a distance from.
+  - Not usable as is; low priority.
+- **Hum while moving between spots (user's idea): not built.** Phase tracking under-read real motion earlier; with
+  several reflectors, path changes don't add up to one movement; errors would likely exceed the +-10-20 cm a sweep
+  gives. Revisit only if ambiguous axes are common in real two-spot tests (the heading at set-off is a cheaper fix).
