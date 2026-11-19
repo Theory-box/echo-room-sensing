@@ -1071,3 +1071,28 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     2. turn once (room locks from this sweep only);
     3. crouch, phone at knee height -> Next;
     4. turn once (recorded but kept OUT of the room box).
+
+## 2026-11-19: guided Test results, attachments, vibration, sensitivity per mode
+
+- Guided Test (high + low sweep) ran twice at the usual spot.
+  - Second run (slower, more time facing each wall) matched the room: walls 2.13 / 1.35 / 1.60 / 3.21 m. First run put the back
+    wall at 4.94 m: a clean 4.7-4.8 m echo outvoted a weak, smeared nearer echo (13 vs 108 detections).
+  - Half wall: ~0.8 m straight ahead, heard only at knee height (+14 dB), same place in both runs. Head height sees over it.
+  - Ceiling: everywhere-echo ~1.1-1.2 m at head height and ~2.3 m at knee height (~1.1 m drop; ceiling ~2.6-2.7 m).
+  - Near side and back walls heard at head height only: a mattress against the back wall swallowed the knee-height echo.
+    Lesson: hearing a low thing is reliable; NOT hearing one means nothing (open space or soft). Low layer must only add.
+- Attachments (all vs the bare Test at the same spot, absolute levels):
+  - Straight cardboard box: walls not louder, beam not narrower; ceiling echo -6 dB; self-noise +9-14 dB only within 0.5 m.
+  - Paper towel roll (squeezed): rings, a direction-independent +10 dB halo 0.6-1.35 m. Room box locked fast (37 s) but on
+    the halo: 2.3 x 2.4 m instead of 3.7 x 4.6 m. No precision gain. A flared shape is the only one theory says helps.
+  - Sensitivity was Medium (-38) for these runs, carried over from an audible mode; ~3-4 dB more sensitive than Auto.
+- Vibration (phone still on a table, Quiet tones, raw audio):
+  - Fan: audible hum 56 Hz (+112). From the inaudible band alone, range-gated, the echo at ~0.41 m (fan, user confirms
+    ~16 in) is modulated at 56 and 112 Hz, +25 dB vs the table run. Blind search is swamped by the chord's 23.4 Hz
+    period artefacts; needs a baseline comparison.
+  - Table wobble at 7-14 s: accelerometer and two echoes both show 1.9 Hz; echo movement 20-60 um rms; still noise
+    ~0.08 mm per second-long window.
+  - The app showed "0.2 m" in ~97% of readings in Quiet tones: the near-zone static removal only runs for chirps
+    (`if (!UD && !HS)`), so the speaker leak tail is reported. The fan at 0.41 m is inside NEAR_M = 0.6 m in every mode.
+- Change (build "2026-11-19 sens resets per mode"): switching Ping mode resets Sensitivity to that mode's default
+  (Auto for the inaudible modes, Medium for audible) instead of carrying the previous choice over.

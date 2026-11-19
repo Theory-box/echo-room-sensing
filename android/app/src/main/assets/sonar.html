@@ -1369,7 +1369,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 test: next buttons';
+const APP_BUILD = '2026-11-19 sens resets per mode';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2317,7 +2317,7 @@ function showViewHelp() {
   $('howmap').style.display = m ? '' : 'none'; $('wallsrow').style.display = m ? '' : 'none';
 }
 $('dirf').onchange = () => { clearAcc(); clearMap(); showViewHelp(); };
-$('ping').onchange = () => { buildSens($('sens').value); const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) clearAcc(); showViewHelp(); saveSettings(); if (running) { stop(); start(true); } };
+$('ping').onchange = () => { buildSens(null); /* new mode: back to its own default sensitivity (Auto for the inaudible modes) */const v = $('dirf').value; buildView(v); if ($('dirf').value !== v) clearAcc(); showViewHelp(); saveSettings(); if (running) { stop(); start(true); } };
 $('rate').onchange = () => { if (running) { stop(); start(true); } };
 $('bands').onchange = () => { if (running) { stop(); start(true); } };
 $('roombox').onchange = () => { clearAcc(); clearMap(); };   // clears the room box, position and map together (audit 2026-11-18)
