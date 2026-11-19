@@ -976,3 +976,22 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   - **Lock problem in this room:** in one direction there are steady surfaces at ~1.0-1.1, ~1.4-1.5, ~2.5 and
     ~4.9-5.0 m from the usual first spot (all 3 sessions). The box takes the most-voted one, and this time it was the
     4.95 m surface seen through an opening (the room came out too long). In the previous session it settled on 1.21 m.
+- **Loud ticks while walking: switched OFF (build "quiet walk", LOUD_WALK_ON = false; code kept).** What we learned:
+  - Low / full-range pitches spread sideways and behind, and the two mics can time direction at 2-8 kHz, so in
+    principle a loud click hears the side and back walls. In practice (one walk, 23 clicks at 2/s, half amplitude),
+    each click returns ~5 echoes over 1.3-4.7 m: floor, ceiling, furniture, multi-bounce. Side walls matched only 6
+    times, ambiguously.
+  - The inaudible chirps track the wall ahead better: narrower beam (less clutter near the wall's distance), longer
+    glide (more energy), and all the tuning was done on them.
+  - **If revisited:** MIX loud clicks in (don't replace the inaudible ones); save the walk audio properly (create the
+    session folder at Start, not only at Stop); try a higher loud rate during slow walks; assign echoes using the
+    room model plus the two-mic ahead/side/behind label.
+- **Next session -- ideas in order:**
+  1. **The opening direction in the larger room:** pick the wall when a far surface (>~1 m beyond a strong nearer one)
+     is really something seen through an opening. Needs the user to say what is in that direction (surfaces at
+     ~1.0-1.1, ~1.4-1.5, ~2.5, ~4.9-5.0 m).
+  2. **Refine room dimensions from later spots** (currently the box only refits at the first spot; later spots add
+     pieces and wall ends but don't refine its sizes) -- e.g. from spots that see both walls of an axis.
+  3. **Automatic step detection** (walking toward a wall = an implicit Pause/Resume), with "walk this way" lanes.
+  4. **Furniture vs walls, openings as gaps, two-height layers, tracking from all known walls across the beam.**
+  5. **A Test button** that carries a ready-made test plan in each build.

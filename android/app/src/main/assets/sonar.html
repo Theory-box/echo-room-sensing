@@ -901,6 +901,10 @@ function drawPieces(sc) {    // extra wall pieces (room frame): drawn over the l
 // Map, room and position are kept across both switches (restart with keep).
 let MOVE_LOUD = null, MOVE_RAWN = 0;
 const LOUD_PING = 'wide', LOUD_RATE = '2', LOUD_AMP = 0.5;
+// OFF after the first test (2026-11-18 21:45): the loud ticks REPLACED the inaudible chirps while walking (only 2
+// readings/s, so the steady wall-ahead reading was lost); each tick gave ~5 echoes over 1.3-4.7 m, side walls matched
+// in only 6 of 23 and ambiguously. Kept for a later, better-designed test (mixed in, not replacing; walk audio saved).
+const LOUD_WALK_ON = false;
 function loudRestore(restart) {
   if (!MOVE_LOUD) return;
   $('ping').value = MOVE_LOUD.ping; $('rate').value = MOVE_LOUD.rate; MOVE_LOUD = null;
@@ -917,7 +921,7 @@ $('moved').onclick = () => {
     return;
   }
   MOVE = { phase: 'paused', secs: new Set(), E: [], buf: [], walk: [], walkEst: null, spot: 1 };
-  if (running && $('ping').value === 'quietlong') {
+  if (LOUD_WALK_ON && running && $('ping').value === 'quietlong') {
     MOVE_LOUD = { ping: $('ping').value, rate: $('rate').value };
     $('ping').value = LOUD_PING; $('rate').value = LOUD_RATE; stop(); start(true);
   } $('moved').textContent = 'Resume here'; logEv('move-pause');
@@ -1228,7 +1232,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-18 loud walk test';
+const APP_BUILD = '2026-11-18 quiet walk';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
