@@ -31,5 +31,12 @@ Ideas to build / explore
 15. Room map open items: low-things layer (hard low things only; a quiet knee sweep is not a gap), bounce check should
     ignore lengths matching all-round (ceiling) echoes, the left wall's 3.2 m vs 2.5 m question, multi-room / saved rooms.
 
+17. Deep dives the user wants (curiosity, not urgent): the magnetometer (how sensitive, what it can map: steel door
+    hardware, radiators, wiring as landmarks), Wi-Fi sensing (RTT, signal strength), and the broader "what can every
+    sensor extract" exploration. First-principles sensor names are in SENSORS.md.
+18. Ways to use the microphones' 48 000 samples/s beyond pulsed sonar: continuous coded sonar (thousands of updates per
+    second: gait, heartbeat-scale micro-motion), many signals at once in the band (sonar + data + beacons), microsecond
+    timing between mics, fast transients.
+
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
