@@ -71,6 +71,14 @@ Ideas to build / explore
     contact) or cancelled as a known signal. First test: short buzz patterns on a hard table, log twist / push / sonar:
     does it move or spin, which way, how consistently.
 20. Card ears and a tube relocating one mic (probe-tube style) to widen the mic triangle: see the test queue.
+21. Doorways from sound leakage (user, 2026-11-19): a room's own sounds (bedroom AC etc.) leak into the next room
+    mostly through the doorway (walls cut 30-40 dB; higher-pitched parts most), so loudness, direction and door
+    open/closed (10-20 dB drop) point to the opening; combine with sonar blank stretches and where the room
+    fingerprint switches while walking through.
+22. Whole-floor map (planned): second floor has laundry room - kitchen - loft, and the loft connects to three rooms.
+    Plan: map each room (Guided scan + ring check, ideally 2 spots), record both sides of each doorway with the door
+    open and closed, note steady sound sources per room (AC, fridge, washer), then offline analysis of what joins up.
+    The user tells me which session was which room (or says it at the start of a Record only take).
 
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
