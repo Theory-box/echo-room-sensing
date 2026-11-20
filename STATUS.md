@@ -1129,3 +1129,19 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     The half-wall echo was ~30 dB stronger than in Test 2 and the mic timing matched the flat-held box runs: the phone
     was probably held differently. Weak spot found: the front-back bounce check "confirmed" 2.31 m, likely the ceiling's
     all-round double echo (~2.26 m); the bounce check should ignore lengths that match all-round echoes.
+- Main menu + Guided room scan (build "2026-11-19 main menu + guided scan"):
+  - The app opens on a menu: Live radar (the radar as before; its top-left button is now Menu, the old Tools page is no
+    longer linked) or Guided room scan.
+  - Guided: 1 ring check (or skip), 2 sweep right, 3 sweep back left (no room lock during the sweeps), 4 attention marks
+    (each wall of a free fit, flagged weak / maybe a ghost / sweeps disagree, plus a second candidate distance in the same
+    direction when it has >= half the echoes; max 8): turn to one, push in and out; a new green reading there resolves it
+    (confirmed, or "other" if at a different distance), a push-test ghost removes it, 25 s facing without an answer gives
+    up; Skip / Finish now buttons; after 12 s facing a mark, 6 s of High chirps (faintly audible) then back. 5 fit: green
+    readings added 25x to the room-box echoes (kept for later refits), room angle from the largest group of greens
+    agreeing within 6 deg (>= 2 and >= half), else the free fit; then lock, confidence, map; walking stops the radar
+    (fixed map). Cancel at every step. All steps logged as `guide` events.
+  - Replayed on saved logs: tonight's run fits the front at 2.20 m instead of the half wall (0.6 m, the early lock);
+    Test 2 reproduces its room within a few cm. The room angle is still uncertain: greens were too scattered to set it in
+    all three runs, and the free fit gave -1 / 16 / 26 deg for the same room.
+  - Ideas for later (user): smarter loud checks (one loud click, check whether it helped, repeat only if needed) instead
+    of fixed 12 s / 6 s.
