@@ -1108,3 +1108,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   disturbing a 3-8 cm focus, speaker mix-ups during the session. Next try: a spot with no line of sight to the speaker,
   measured with the phone (measure.py) instead of by ear. Scripts in analysis/time_reversal/; the playback page is the
   "Sound Focus Bench" artifact.
+- Ring check + room confidence (build "2026-11-19 ring check + room confidence"):
+  - Ring check button: ~10 s of audible chirps (2-8 kHz, 60 ms, one per second), phone held still; periods averaged,
+    deconvolved per band (2-3, 3-4.5, 4.5-7 kHz), Schroeder decay stopped at the noise floor -> T20/T10/early decay;
+    median shown as "ring 0.xx s . word" on the radar and logged as a `ring` event. Offline on the PC-speaker
+    recording (computer room): 0.17-0.21 s per band in JS vs 0.16-0.26 s in Python. Fake-phone page test with a 0.40 s
+    room: 0.38 s.
+  - Room confidence ("Room NN%", top right of the radar, Map view after the room box locks): 35 % walls backed (>=
+    max(15, 3x clutter) echoes and not the corner-bounce ghost of the others), 25 % steady since the lock (8 cm),
+    40 % wall-to-wall bounce echoes heard along each axis (3 dB over surroundings, 2 dB over the across view; beyond 5 m
+    or too few readings = half credit). Readings before the lock are replayed once the rotation is known. Replay of the
+    2026-11-19 logs: matched-room Test 80 %, bad-back-wall Test 61 %, box/roll runs 31-45 %. Logged as `rc`.

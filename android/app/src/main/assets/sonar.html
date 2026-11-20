@@ -31,8 +31,8 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button><button class="alt" id="testend" style="display:none">End test</button></div>
-  <div id="radarcol"><canvas id="ppi" width="720" height="720"></canvas></div>
+  <div id="topbtns" class="row"><button class="alt" id="back">Tools</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button><button class="alt" id="ringbtn">Ring check</button><button class="alt" id="testend" style="display:none">End test</button></div>
+  <div id="radarcol" style="position:relative"><canvas id="ppi" width="720" height="720"></canvas><div id="roomconf" style="display:none;position:absolute;top:8px;right:8px;background:rgba(0,0,0,.55);color:#fff;padding:4px 8px;border-radius:6px;font:13px sans-serif;text-align:right;pointer-events:none;line-height:1.35"></div></div>
   <div id="sidecol">
   <label style="margin:6px 0">Click volume <input id="vol" type="range" min="10" max="100" value="80" style="flex:1"> <span id="volv">80%</span></label>
   <canvas id="ascan" width="720" height="170"></canvas>
@@ -1036,6 +1036,7 @@ function testTick(theta) {      // called every reading while the sonar runs; re
   return `TEST ${TEST.i + 1}/${TEST_PLAN.steps.length} (${prog}): ${cur.t} `;
 }
 $('testend').onclick = () => { if (TEST) testFinish('cancel'); };
+$('ringbtn').onclick = () => ringCheck();
 $('testbtn').onclick = async () => {
   if (TEST) { TEST.next = true; logEv('test-next', { step: TEST.i }); return; }   // during a test this button is Next
   const saved = {}; for (const k of ['ping', 'rate', 'dirf', 'roombox', 'sens', 'walls']) if ($(k)) saved[k] = $(k).value;
@@ -1046,7 +1047,159 @@ $('testbtn').onclick = async () => {
   await start(false);
   if (TEST) testStep(0);
 };
-function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], sf: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; }
+// ---------- Ring check (2026-11-19): how long the room rings after a click ----------
+// The phone plays one audible chirp per second (RING_N times) and records. The periods are averaged (the room is still,
+// so every period is the same), deconvolved with the played chirp (circular: the loop is periodic) into an impulse
+// response per pitch band, and the ring time read from its energy decay (Schroeder backward integration, stopped where
+// the decay meets the noise floor, noise subtracted; T20 = fit -5..-25 dB, T10 = -5..-15 dB, early = 0..-10 dB, all
+// scaled to 60 dB). Offline on the 2026-11-19 PC-speaker recording (computer room, 2-7 kHz): T10 0.16-0.26 s.
+const RING_F0 = 2000, RING_F1 = 8000, RING_T = 0.06, RING_N = 9, RING_AMP = 0.5;
+const RING_BANDS = [[2000, 3000], [3000, 4500], [4500, 7000]];
+function ringFit(t, db, a, b) {
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < t.length; i++) if (db[i] <= a && db[i] >= b) { n++; sx += t[i]; sy += db[i]; sxx += t[i] * t[i]; sxy += t[i] * db[i]; }
+  if (n < 20) return null;
+  const k = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  return k < 0 ? -60 / k : null;
+}
+function ringFromEnergy(E, sr) {
+  const P = E.length, pre = Math.round(0.002 * sr);
+  let i0 = 0; for (let i = 1; i < P; i++) if (E[i] > E[i0]) i0 = i;
+  const e = new Float64Array(P); for (let j = 0; j < P; j++) e[j] = E[(i0 - pre + j + P) % P];
+  const w = Math.round(0.01 * sr), sm = new Float64Array(P);
+  let acc = 0; for (let j = 0; j < P; j++) { acc += e[j]; if (j >= w) acc -= e[j - w]; sm[j] = acc / Math.min(j + 1, w); }
+  const a0 = pre + Math.round(0.70 * sr), a1 = Math.min(P, pre + Math.round(0.88 * sr));
+  const noise = Array.from(sm.subarray(a0, a1)).sort((x, y) => x - y)[(a1 - a0) >> 1] + 1e-30;
+  let ip = 0; for (let j = 0; j < Math.round(0.02 * sr); j++) if (sm[j] > sm[ip]) ip = j;
+  let ic = P - 1; for (let j = ip; j < P; j++) if (sm[j] < noise * Math.pow(10, 0.5)) { ic = j; break; }
+  const n = ic - ip; if (n < 50) return { t20: null, t10: null, edt: null, range: 10 * Math.log10(sm[ip] / noise), end: 0 };
+  const sch = new Float64Array(n); let s = 0;
+  for (let j = n - 1; j >= 0; j--) { s += Math.max(0, e[ip + j] - noise); sch[j] = s; }
+  const t = new Float64Array(n), db = new Float64Array(n);
+  for (let j = 0; j < n; j++) { t[j] = j / sr; db[j] = 10 * Math.log10(sch[j] / sch[0] + 1e-30); }
+  const minDb = db[n - 1];
+  return { t20: minDb < -24 ? ringFit(t, db, -5, -25) : null, t10: minDb < -14 ? ringFit(t, db, -5, -15) : null,
+           edt: minDb < -9 ? ringFit(t, db, 0, -10) : null, range: 10 * Math.log10(sm[ip] / noise), end: n / sr };
+}
+// x: recording (whole periods, phone still), play: one played period (length P)
+function ringAnalyse(x, play, P, sr, bands) {
+  const K = Math.floor(x.length / P), avg = new Float64Array(P);
+  for (let k = 0; k < K; k++) for (let i = 0; i < P; i++) avg[i] += x[k * P + i] / K;
+  const Xr = Float64Array.from(avg), Xi = new Float64Array(P); fftN(Xr, Xi, false);
+  const Cr = new Float64Array(P), Ci = new Float64Array(P); for (let i = 0; i < Math.min(P, play.length); i++) Cr[i] = play[i]; fftN(Cr, Ci, false);
+  const out = [];
+  for (const [lo, hi] of bands) {
+    const k0 = Math.ceil(lo * P / sr), k1 = Math.floor(hi * P / sr), nb = k1 - k0 + 1;
+    const Hr = new Float64Array(P), Hi = new Float64Array(P);
+    for (let k = k0; k <= k1; k++) {
+      const wgt = 0.5 - 0.5 * Math.cos(2 * Math.PI * (k - k0 + 1) / (nb + 1)), d = Cr[k] * Cr[k] + Ci[k] * Ci[k] + 1e-30;
+      Hr[k] = wgt * (Xr[k] * Cr[k] + Xi[k] * Ci[k]) / d; Hi[k] = wgt * (Xi[k] * Cr[k] - Xr[k] * Ci[k]) / d;
+    }
+    fftN(Hr, Hi, true);
+    const E = new Float64Array(P); for (let i = 0; i < P; i++) E[i] = Hr[i] * Hr[i] + Hi[i] * Hi[i];
+    out.push(Object.assign({ lo, hi }, ringFromEnergy(E, sr)));
+  }
+  return out;
+}
+function ringSummary(res) {
+  const v = res.map(b => b.t20 || b.t10).filter(Boolean);
+  if (!v.length) return null;
+  const rt = v.sort((a, b) => a - b)[v.length >> 1];
+  const word = rt < 0.3 ? 'very soft' : rt < 0.5 ? 'soft' : rt < 0.8 ? 'medium' : rt < 1.2 ? 'lively' : 'very echoey';
+  return { rt, word };
+}
+
+// ---------- Room confidence (2026-11-19): how well the room box agrees with itself ----------
+// Re-scored at every room-box refit after the lock, 0-100 %:
+//  35 % walls backed: each wall has >= max(15, 3 x clutter) echoes and is not exactly the corner-bounce ghost of the
+//       others (hypot(opposite wall, cross length) within 10 cm while being the farthest wall: the 2026-11-19 Test-1 error);
+//  25 % steady: each wall within 8 cm of where it was at the lock;
+//  40 % bounces: the wall-to-wall echo at front+back (and left+right) is heard in the raw profile while facing along
+//       that axis (>= 3 dB over its surroundings and >= 2 dB over the across-axis view, so all-round rings do not count);
+//       beyond the 5 m profile or < 30 readings = unknown (half credit).
+// Offline on the 2026-11-19 logs: matched-room Test 80 %, bad-back-wall Test 61 %, box/roll runs 31-45 %.
+// Readings before the lock are kept (heading + raw profile) and replayed once the room's rotation is known.
+const RC_BUF_MAX = 4000;
+let RC = { acc: [null, null], n: [0, 0], rot: null, buf: [], lockD: null, pct: null, row: null, txt: '' };
+function rcReset() { RC = { acc: [null, null], n: [0, 0], rot: null, buf: [], lockD: null, pct: null, row: null, txt: '' }; }
+function rcAddProfile(theta, rawDb) {
+  if (!rawDb || !rawDb.length) return;
+  if (RC.rot === null) { RC.buf.push([theta, rawDb]); if (RC.buf.length > RC_BUF_MAX) RC.buf.shift(); return; }
+  rcAccum(theta, RC.rot, rawDb);
+}
+function rcLock(rot, D) { RC.rot = rot; RC.lockD = D.slice(); for (const [th, p] of RC.buf) rcAccum(th, rot, p); RC.buf = []; }
+function rcAccum(theta, rot, rawDb) {
+  for (let ax = 0; ax < 2; ax++) {
+    const d = Math.abs(angDiff(theta, rot + 90 * ax));
+    if (Math.min(d, 180 - d) >= 25) continue;
+    if (!RC.acc[ax] || RC.acc[ax].length !== rawDb.length) { RC.acc[ax] = new Float64Array(rawDb.length); RC.n[ax] = 0; }
+    for (let i = 0; i < rawDb.length; i++) RC.acc[ax][i] += Math.pow(10, rawDb[i] / 10);
+    RC.n[ax]++;
+  }
+}
+function rcBounce(ax, L) {
+  const A = RC.acc[ax], B = RC.acc[1 - ax];
+  if (!A || !B || RC.n[ax] < 30 || RC.n[1 - ax] < 30 || A.length !== B.length) return null;
+  const NB = A.length, i = Math.floor(L / 0.03);
+  if (i + 4 >= NB) return null;
+  const mp = j => 10 * Math.log10(A[j] / RC.n[ax] + 1e-30), mq = j => 10 * Math.log10(B[j] / RC.n[1 - ax] + 1e-30);
+  let j = Math.max(0, i - 3); for (let k = j; k < i + 4; k++) if (mp(k) > mp(j)) j = k;
+  const loc = []; for (let k = Math.max(0, i - 20); k < Math.min(NB, i + 21); k++) loc.push(mp(k));
+  loc.sort((a, b) => a - b);
+  const across = Math.max(mq(Math.max(0, j - 1)), mq(j), mq(Math.min(NB - 1, j + 1)));
+  return mp(j) - loc[loc.length >> 1] >= 3 && mp(j) - across >= 2 ? 1 : 0;
+}
+function rcScore(D, votes, clutter) {
+  const cl = Math.max(1, clutter), W = [0, 1, 2, 3];
+  const ghost = w => { const far = Math.max(...W.filter(u => u !== w).map(u => D[u]));
+    return D[w] > far && Math.abs(Math.hypot(D[(w + 2) % 4], D[(w + 1) % 4] + D[(w + 3) % 4]) - D[w]) <= 0.10; };
+  const sup = W.map(w => votes[w] >= Math.max(15, 3 * cl) && !ghost(w));
+  const stab = W.map(w => Math.abs(D[w] - RC.lockD[w]) <= 0.08);
+  const bn = [0, 1].map(ax => rcBounce(ax, D[ax] + D[ax + 2]));
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+  RC.pct = Math.round(100 * (0.35 * mean(sup.map(Number)) + 0.25 * mean(stab.map(Number)) + 0.4 * mean(bn.map(b => b === null ? 0.5 : b))));
+  RC.row = [RC.pct, sup.map(Number).join(''), stab.map(Number).join(''), ...bn.map(b => b === null ? -1 : b)];
+  RC.txt = `walls ${sup.filter(Boolean).length}/4 · steady ${stab.filter(Boolean).length}/4 · bounces ${bn.filter(b => b === 1).length}/${bn.filter(b => b !== null).length}`;
+  return RC.pct;
+}
+
+let RING = null, RING_BUSY = false;
+function showRoomConf() {
+  const el = $('roomconf'); if (!el) return;
+  const lines = [];
+  if (RC.pct !== null) lines.push(`<b style="font-size:18px;color:${RC.pct >= 75 ? '#7CFC9A' : RC.pct >= 50 ? '#FFD166' : '#FF8A80'}">Room ${RC.pct}%</b>`, `<span style="opacity:.85">${RC.txt}</span>`);
+  if (RING) lines.push(`<span style="opacity:.85">ring ${RING.rt.toFixed(2)} s \u00b7 ${RING.word}</span>`);
+  el.innerHTML = lines.join('<br>'); el.style.display = lines.length ? '' : 'none';
+}
+// Ring check button: ~10 s of audible chirps (one per second) with the phone held still, then the ring time per band.
+async function ringCheck() {
+  if (RING_BUSY || TEST || MOVE) return;
+  if (running) stopByUser();
+  RING_BUSY = true; $('ringbtn').disabled = true;
+  const P = SR, c = linChirp(SR, RING_F0, RING_F1, RING_T, 'hann'), play = new Float32Array(P);
+  for (let i = 0; i < c.I.length; i++) play[i] = RING_AMP * c.I[i];
+  try { if (Native.setMicChannels) Native.setMicChannels(2); if (Native.setRingSeconds) Native.setRingSeconds(40); } catch (e) { }
+  RAW_SECS = 40;
+  const r = Native.sonarStart(f32ToB64(play), P, SR);
+  if (r !== 'ok') { $('status').textContent = 'Ring check could not start: ' + r; RING_BUSY = false; $('ringbtn').disabled = false; return; }
+  logEv('ring-start', { f0: RING_F0, f1: RING_F1, T: RING_T, n: RING_N, amp: RING_AMP });
+  for (let k = RING_N + 1; k > 0; k--) { $('status').textContent = `Ring check: hold the phone still in open space and stay quiet (${k} s)`; await sleep(1000); }
+  let x = null; try { const q = Native.sonarRead((RING_N - 1) * P, 0); x = b64ToF32(q.slice(q.indexOf('|') + 1)); } catch (e) { }
+  Native.sonarStop(); try { Native.sonarRestoreVolume(); } catch (e) { }
+  let msg;
+  if (!x || x.length < 2 * P) { msg = 'Ring check: recording too short, try again.'; logEv('ring', { error: 'short', n: x ? x.length : 0 }); }
+  else {
+    const res = ringAnalyse(x, play, P, SR, RING_BANDS), sum = ringSummary(res), rd = v => v === null ? null : +v.toFixed(3);
+    RING = sum ? Object.assign({ bands: res }, sum) : null;
+    logEv('ring', { bands: res.map(b => [b.lo, b.hi, rd(b.t20), rd(b.t10), rd(b.edt), Math.round(b.range), +b.end.toFixed(2)]), rt: sum ? +sum.rt.toFixed(3) : null, word: sum ? sum.word : null });
+    msg = sum ? `Ring check: the room rings for about ${sum.rt.toFixed(2)} s (${sum.word}).` : 'Ring check: no clear fade measured (too noisy, or the phone moved). Try again in a quieter moment.';
+  }
+  saveLog();
+  showRoomConf(); $('status').textContent = msg;
+  RING_BUSY = false; $('ringbtn').disabled = false;
+}
+
+function clearWalls() { RUNS = []; WALLS = []; rcdDone = []; WIDE = []; REG = []; NEARREG = []; UH = 0; UHlast = null; UHlo = UHhi = 0; RBOX = { h: [], r: [], px: [], py: [], sf: [], last: 0, fit: null }; SLM = null; WY = { hist: [], dist: [] }; PG = { buf: [], ghosts: [], last: 0 }; FO = { tr: null, good: [], live: null, flash: null, log: null }; MOVE = null; HCORR = 0; TURN = null; XW = []; SPOTS = 1; if ($('moved')) $('moved').textContent = 'Pause to move'; rcReset(); showRoomConf(); }
 // ---------- Room box (test, 2026-11-18): the simplest room that explains all the echoes -- four walls at right angles ----------
 // A wall is heard while you face it roughly squarely (within RB_FACE deg of its normal); its echo distance is then
 // D - ARM*cos(heading - normal). For each rotation of the box (1-deg steps over 90 deg), each wall's distance D is the value
@@ -1374,7 +1527,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 record only mode';
+const APP_BUILD = '2026-11-19 ring check + room confidence';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2144,6 +2297,7 @@ function frame(binM, binS, t0) {
         foTick(t0, theta, kept); if (FO.flash && !FO.flash.tw) FO.flash.tw = performance.now();
         updateMap(theta, kept, mk, mR); wipeRings(); updateWalls(theta, kept, t0);
         if ($('roombox').value === 'on') {
+          { const lr = sonarLog[sonarLog.length - 1]; if (lr && lr.p && SPOTS === 1 && !(TEST && TEST_PLAN.steps[TEST.i] && TEST_PLAN.steps[TEST.i].noBox)) rcAddProfile(theta, lr.p); }
           const rsK = kept.map(q => q.r);
           const testNoBox = TEST && TEST_PLAN.steps[TEST.i] && TEST_PLAN.steps[TEST.i].noBox;   // low sweep: not part of the room box
           if (!testNoBox) for (const q of kept) if (q.tconf && q.r > RB_MIN && !withYou(q.r)) { RBOX.h.push(theta); RBOX.r.push(q.r - (q.dc || 0)); RBOX.px.push(SLM ? SLM.x : 0); RBOX.py.push(SLM ? SLM.y : 0); RBOX.sf.push(sumFlag(q.r, rsK)); }
@@ -2151,7 +2305,7 @@ function frame(binM, binS, t0) {
           if (RBOX.h.length >= 200 && t0 - RBOX.last > (SPOTS > 1 ? 3000 : 1000) && !(SLM && slWalking(performance.now())) && !MOVE) {
             // after the lock the rotation stays fixed: refitting it from drifting gyro headings made the box follow the drift
             RBOX.fit = roomFit(SLM ? SLM.rot : null, SLM && SPOTS > 1 ? SLM.D : null); RBOX.last = t0; rbNew = true;
-            if (!SLM) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; } }
+            if (!SLM) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; rcLock(RBOX.fit.rot, RBOX.fit.D); } }
             else slRefit(RBOX.fit);   // the locked room keeps improving from every echo (each corrected for where you stood)
           }
           if (SLM) {
@@ -2171,6 +2325,7 @@ function frame(binM, binS, t0) {
         const fl = sonarLog[sonarLog.length - 1];
         if (fl) { fl.nw = WALLS.filter(w => !wallHidden(w)).length; if (rcdDone.length) { fl.rcd = rcdDone; rcdDone = []; }
           if (rbNew && RBOX.ghosts) { fl.rbg = RBOX.ghosts; RBOX.ghosts = null; }
+          if (rbNew && RBOX.fit && RC.rot !== null && SPOTS === 1 && !MOVE) { rcScore(RBOX.fit.D, RBOX.fit.votes, RBOX.fit.clutter); fl.rc = RC.row; showRoomConf(); }
           if (rbNew && RBOX.fit) { fl.rb = [RBOX.fit.rot, ...RBOX.fit.D.map(v => +v.toFixed(2)), ...RBOX.fit.votes, RBOX.fit.clutter, RBOX.fit.n]; if (RBOX.fit.rings.length) fl.rbr = RBOX.fit.rings; }
           if (slNew) fl.slk = [SLM.rot, ...SLM.D.map(v => +v.toFixed(2)), ...SLM.sup, SLM.clutter];
           if (slRow) fl.sl = slRow; if (TEST) fl.ts = TEST.i; if (tcRow) fl.tk = tcRow; if (mvRow) fl.mv = mvRow; if (MOVE) fl.mov = MOVE.phase === 'paused' ? -1 : MOVE.secs.size;
@@ -2287,7 +2442,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rc = room confidence, re-scored at each room-box refit after the lock [percent, walls backed 1/0 x4, walls steady since the lock 1/0 x4, front-back bounce heard, left-right bounce heard (1 yes, 0 no, -1 unknown)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg; ring = Ring check result {bands: [low Hz, high Hz, T20 s, T10 s, early decay s, decay range dB, decay length s], rt: ring time s, word}.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
