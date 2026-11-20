@@ -1162,3 +1162,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   move ~1.0-1.3 mm during the wobble vs ~0.1 mm still. So: the phone moved ~1 mm along the facing direction relative to
   the room (the cm the user saw were likely sideways / vertical, or at the table edge); the still noise floor for wall
   echoes is ~0.1 mm, not micrometres. The 1.9 Hz rhythm match with the accelerometer stands.
+- The user says the table-wobble test (2026-11-19 16:30) wobbled the table by about an inch after Start; the phone's
+  sensors disagree: raw linear acceleration peaked 0.15 m/s2 sideways / 0.06 up (an inch at ~2 Hz would be ~2 m/s2),
+  gyro ~0, sonar to the walls ~1 mm. The analysis uses max-min per 0.5 s (a full swing), not averages, so cancelling is
+  not the cause. Unexplained (phone maybe on a part of the table that moved little, or on something soft): treat the
+  test as unreliable.
+- TO TEST LATER (user asked): controlled motion/precision test. Phone on a firm surface; slide known distances against
+  a ruler (5 mm, 10 mm, 25 mm) with pauses, then a visible wobble of the phone itself; Record only (or Inaudible chord)
+  so raw audio + motion sensors are saved. Compare sonar wall-echo movement, accelerometer and the known distances.
