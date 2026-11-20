@@ -35,4 +35,9 @@ Brainstormed with the user; none built. Ranked roughly by promise. All untested.
    feeding from an off-centre speaker, cavity modes, ringing, leaks (screen window), flex. Too ambitious for now.
 7. Small steady barrier (foam / Blu Tack) between speaker and mic on the bottom edge: a few dB less airborne leak; most
    leak goes through the phone body. A finger is too unsteady and reflects.
+8. Card "ears" curved around the phone's sides (open, no ringing): maybe +3-6 dB from the front, 6-10 dB less from
+   behind and from the body; mainly reduces front/back ghosts. Hands work for a try but move.
+9. Tube relocating one mic (like audiologists' probe-tube mics): thin tubing (< 8 mm, e.g. 4-6 mm air-line), 20-40 cm,
+   sealed over the mic, mouth fixed on a stick -> a wide mic triangle (left-right and up-down clues), less speaker
+   blast at that mic. Fixed delay and colour need a one-time measurement; fine timing more ambiguous at 16-22 kHz.
 Not useful: single small hole (omni + ringing), one opening split into two paths (same delay for every direction).

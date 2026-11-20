@@ -1,5 +1,31 @@
 # Things the user asked to remember / test later (kept as of 2026-11-19)
 
+# Test queue (run in a row when there is time)
+
+Ready now (no app changes needed):
+- [ ] **Guided scan check**: one Guided scan in the half-wall room; confirm sound stops at the end, still map + Main
+      menu; I check the log for the old unlocked-refit error.
+- [ ] **Which hole is which mic**: Record only, tap gently next to each mic hole in turn (bottom edge, top, back),
+      ~3 s apart, saying nothing. Needed before the mic-tube test.
+- [ ] **Card ears**: card curved around both sides of the phone (fixed, not hands), Guided scan; compare with a plain
+      scan: confidence, fewer far echoes behind.
+- [ ] **Mic tube (wider triangle)**: aquarium air-line tubing (4-6 mm inside), sealed over one mic, mouth taped ~25 cm
+      out to the side on a ruler; Record only, turn slowly in front of a flat wall ~1.5 m away.
+- [ ] **Felt-lined speaker tube**: ~10 cm tube lined with felt over the speaker only; Guided scan; compare.
+- [ ] **Half-covered opening**: felt over the left half of the box mouth; Record only, turn 45 deg left, centre,
+      45 deg right at a wall.
+- [ ] **Controlled motion / precision**: phone on a firm surface, slid 5, 10, 25 mm against a ruler with pauses, then a
+      visible wobble of the phone itself; Record only.
+- [ ] **Extra ring check** (optional): Redo ring check from a second spot in the same room.
+
+Needs a small build first (I do it at the start of that session):
+- [ ] **Computer as second device**: install `sounddevice`, speaker check (16-22 kHz from the right speaker), beacon,
+      then two-way distance with the USB mic. Tell me where the USB mic sits.
+- [ ] **Fan trail**: needs Record only that writes to a file (no 2 min limit); close up, turn, step away in stages,
+      fan OFF at the end.
+- [ ] **Self-moving phone**: needs a buzz-pattern test button; hard table, log twist / push / sonar.
+
+
 Tests to run
 1. **Computer as the second device** (next session): install `sounddevice`; (a) speaker check: inaudible 16-22 kHz
    sweep from the RIGHT speaker (Realtek) while the phone records nearby (Record only) -> can the speakers make our band;
@@ -44,6 +70,7 @@ Ideas to build / explore
     to calibrate the hologram ladder, longer crawls for synthetic aperture. The buzz itself as a probe (surface type,
     contact) or cancelled as a known signal. First test: short buzz patterns on a hard table, log twist / push / sonar:
     does it move or spin, which way, how consistently.
+20. Card ears and a tube relocating one mic (probe-tube style) to widen the mic triangle: see the test queue.
 
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
