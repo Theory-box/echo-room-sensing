@@ -1145,3 +1145,14 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     all three runs, and the free fit gave -1 / 16 / 26 deg for the same room.
   - Ideas for later (user): smarter loud checks (one loud click, check whether it helped, repeat only if needed) instead
     of fixed 12 s / 6 s.
+- First real Guided scan (half-wall room, 2026-11-19 19:36-19:40), user: "overall it looked accurate":
+  - Ring check 0.27 s (bands 0.19-0.30). Sweep 1 alone fitted the half wall as the front (0.69 m); after sweep 2 the free
+    fit had the front at 2.22 m. 6 marks, all resolved in 0.6-5 s facing (2 confirmed, 4 "other": greens at a different
+    distance), no loud burst needed. 15 greens, 5.7 deg spread: room angle set from greens (-6 deg). Final box
+    1.87 / 1.47 / 1.50 / 2.48 m, confidence 71 % (walls 3/4, bounces 1 of 2).
+  - The left wall: ~2.5 m in all of tonight's runs (Test 2 earlier had 3.21 m; the user says the app often thinks there is
+    a wall further behind it): tonight the 3.2 m echo had < half the votes, so no "second candidate" mark.
+  - Bug fixed: with the lock held off, the refit called slRefit on a missing room (error every refit, rest of that
+    reading's processing skipped).
+  - End changed (user): when the room is built the sonar stops (sound off, log saved), the map stays drawn, one Main menu
+    button. "Start sweep" renamed "Continue to sweep". Build "2026-11-19 guided: still map at the end".

@@ -1562,7 +1562,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 guided: pause after ring check';
+const APP_BUILD = '2026-11-19 guided: still map at the end';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2341,7 +2341,7 @@ function frame(binM, binS, t0) {
             // after the lock the rotation stays fixed: refitting it from drifting gyro headings made the box follow the drift
             RBOX.fit = roomFit(SLM ? SLM.rot : null, SLM && SPOTS > 1 ? SLM.D : null); RBOX.last = t0; rbNew = true;
             if (!SLM && !GD_NOLOCK) { if (popc(covered) >= 11 && RBOX.fit.votes.filter(v => v > 2 * RBOX.fit.clutter).length >= 3) { slLock(RBOX.fit); slNew = true; rcLock(RBOX.fit.rot, RBOX.fit.D); } }
-            else slRefit(RBOX.fit);   // the locked room keeps improving from every echo (each corrected for where you stood)
+            else if (SLM) slRefit(RBOX.fit);   // the locked room keeps improving from every echo (each corrected for where you stood)
           }
           if (SLM) {
             const wk = slWalking(performance.now());
@@ -2569,7 +2569,7 @@ async function gdRing() {
   if (!GD || GD.stage !== 'ring') return;
   // pause here: the ring check can be done anywhere (e.g. phone lying still), then you go to your scanning spot
   gdSet('ready', 1, 'Ring check done', (RING ? `The room rings for about ${RING.rt.toFixed(2)} s (${RING.word}). ` : 'No clear ring time this time. ') +
-    'Go to the spot you will scan from, hold the phone at head height, bottom edge out, then press Start sweep.', ['Start sweep', () => gdSweep(1)], ['Redo ring check', () => gdRing()]);
+    'Go to the spot you will scan from, hold the phone at head height, bottom edge out, then press Start sweep.', ['Continue to sweep', () => gdSweep(1)], ['Redo ring check', () => gdRing()]);
 }
 async function gdSweep(k) {
   if (!GD) return;
@@ -2644,7 +2644,7 @@ function gdCheckMarks() {
   $('gprog').textContent = `${done} of ${GD.marks.length} marks done`;
 }
 function gdFit() {
-  if (!GD || GD.stage === 'fit' || GD.stage === 'map' || GD.stage === 'fixed') return;
+  if (!GD || GD.stage === 'fit' || GD.stage === 'done') return;
   if (GD.loud) gdLoud(false);
   GD.stage = 'fit';
   const G = FO.good.map(g => ({ h: Math.atan2(g.x, g.y) * 180 / Math.PI, r: Math.hypot(g.x, g.y) - ARM }));
@@ -2670,7 +2670,11 @@ function gdFit() {
   GD_NOLOCK = false; slLock(f); rcLock(f.rot, f.D); rcScore(f.D, f.votes, f.clutter); showRoomConf();
   logEv('guide', { stage: 'fit', greens: G.length, rotFromGreens: rotG, greenSpread: spread === null ? null : +spread.toFixed(1), fitAll: GD.fitAll ? [GD.fitAll.rot, ...GD.fitAll.D.map(v => +v.toFixed(2))] : null,
     fit: [f.rot, ...f.D.map(v => +v.toFixed(2)), ...f.votes, f.clutter], rc: RC.row, marks: GD.marks.map(m => [m.id, m.state]) });
-  gdSet('map', 5, 'Room built', `Room ${RC.pct}% (${RC.txt}). Turn to look around. If you walk away, the radar stops and the map stays as it is.`, ['New scan', () => { gdExit(); gdStart(); }], ['Menu', () => gdExit()]);
+  // finished: stop the sonar (all sound off, log saved) and leave the room drawn as a still map
+  if (running) stopByUser();
+  try { renderMap(+$('range').value); } catch (e) { }
+  gdSet('done', 5, 'Room built', `Room ${RC.pct}% (${RC.txt})` + (RING ? `, rings for ${RING.rt.toFixed(2)} s` : '') + '. The scan is finished and the sound is off.', ['Main menu', () => gdExit()], null);
+  $('gcancel').style.display = 'none';
 }
 function gdFixed() {
   logEv('guide', { stage: 'fixed-map' }); if (running) stopByUser();
@@ -2681,7 +2685,7 @@ function gdExit(cancel) {
   logEv('guide', { stage: cancel ? 'cancel' : 'exit', from: GD.stage });
   if (GD.loud) gdLoud(false);
   if (running) stopByUser(); else saveLog();
-  GD_NOLOCK = false; gdRestore(); GD = null; radarHome(); showScreen('menu');
+  GD_NOLOCK = false; gdRestore(); GD = null; radarHome(); $('gcancel').style.display = ''; showScreen('menu');
 }
 function gdTick() {
   if (!GD) return;
