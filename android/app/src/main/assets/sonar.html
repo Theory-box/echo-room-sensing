@@ -1054,6 +1054,7 @@ $('testbtn').onclick = async () => {
 // the decay meets the noise floor, noise subtracted; T20 = fit -5..-25 dB, T10 = -5..-15 dB, early = 0..-10 dB, all
 // scaled to 60 dB). Offline on the 2026-11-19 PC-speaker recording (computer room, 2-7 kHz): T10 0.16-0.26 s.
 const RING_F0 = 2000, RING_F1 = 8000, RING_T = 0.06, RING_N = 9, RING_AMP = 0.5;
+const RING_SKIP = 0.005;   // s after the direct sound before the decay is read
 const RING_BANDS = [[2000, 3000], [3000, 4500], [4500, 7000]];
 function ringFit(t, db, a, b) {
   let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -1070,8 +1071,10 @@ function ringFromEnergy(E, sr) {
   let acc = 0; for (let j = 0; j < P; j++) { acc += e[j]; if (j >= w) acc -= e[j - w]; sm[j] = acc / Math.min(j + 1, w); }
   const a0 = pre + Math.round(0.70 * sr), a1 = Math.min(P, pre + Math.round(0.88 * sr));
   const noise = Array.from(sm.subarray(a0, a1)).sort((x, y) => x - y)[(a1 - a0) >> 1] + 1e-30;
-  let ip = 0; for (let j = 0; j < Math.round(0.02 * sr); j++) if (sm[j] > sm[ip]) ip = j;
-  let ic = P - 1; for (let j = ip; j < P; j++) if (sm[j] < noise * Math.pow(10, 0.5)) { ic = j; break; }
+  // the decay is read from RING_SKIP after the direct sound: with the speaker and mic on the same phone the direct sound
+  // is 50-90 dB over the noise and swamps the start (2026-11-19: early decay came out as 0.004 s in the half-wall room)
+  let ip = pre + Math.round(RING_SKIP * sr);
+  let ic = P - 1; for (let j = ip + w; j < P; j++) if (sm[j] < noise * Math.pow(10, 0.5)) { ic = j; break; }
   const n = ic - ip; if (n < 50) return { t20: null, t10: null, edt: null, range: 10 * Math.log10(sm[ip] / noise), end: 0 };
   const sch = new Float64Array(n); let s = 0;
   for (let j = n - 1; j >= 0; j--) { s += Math.max(0, e[ip + j] - noise); sch[j] = s; }
@@ -1527,7 +1530,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 ring check + room confidence';
+const APP_BUILD = '2026-11-19 ring check skips direct sound';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });

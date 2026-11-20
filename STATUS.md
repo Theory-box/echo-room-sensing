@@ -1119,3 +1119,13 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     40 % wall-to-wall bounce echoes heard along each axis (3 dB over surroundings, 2 dB over the across view; beyond 5 m
     or too few readings = half credit). Readings before the lock are replayed once the rotation is known. Replay of the
     2026-11-19 logs: matched-room Test 80 %, bad-back-wall Test 61 %, box/roll runs 31-45 %. Logged as `rc`.
+- First real Ring check + sweep in the half-wall room (2026-11-19 evening):
+  - Ring check: the phone's own speaker swamps the start of the decay (early decay logged as 0.004 s). Fixed: the decay
+    is read from 5 ms after the direct sound (build "2026-11-19 ring check skips direct sound"). Re-analysed: half-wall
+    room ~0.29 s, computer room ~0.25 s (PC speaker), fake 0.40 s room 0.39 s.
+  - Sweep: room box locked at 50 s on the half wall as the front wall (0.6 m) with rotation 18 deg (the matched Test 2
+    locked at 7 deg); gyro vs compass agreed within 1-2 deg all run, so the ~20 deg misalignment the user saw was the box
+    rotation, not heading drift. At 63 s the front jumped to 2.19 m (Test 2: 2.13 m) and room confidence fell 71 -> 54 %.
+    The half-wall echo was ~30 dB stronger than in Test 2 and the mic timing matched the flat-held box runs: the phone
+    was probably held differently. Weak spot found: the front-back bounce check "confirmed" 2.31 m, likely the ceiling's
+    all-round double echo (~2.26 m); the bounce check should ignore lengths that match all-round echoes.
