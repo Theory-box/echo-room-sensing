@@ -37,6 +37,13 @@ Ideas to build / explore
 18. Ways to use the microphones' 48 000 samples/s beyond pulsed sonar: continuous coded sonar (thousands of updates per
     second: gait, heartbeat-scale micro-motion), many signals at once in the band (sonar + data + beacons), microsecond
     timing between mics, fast transients.
+19. Self-moving phone (the user's idea): the vibration motor nudges the phone on a table (stick-slip; lopsided buzz
+    patterns bias direction), stop-and-go (buzz, settle, then record), with feedback from the twist sensor and sonar
+    fine tracking. Learn the surface with a few test buzzes; table slope straight from the push sensor (gravity); never
+    step toward an unknown edge (sonar sees the drop). Goal: hands-free room sweeps (self-rotation), known tiny steps
+    to calibrate the hologram ladder, longer crawls for synthetic aperture. The buzz itself as a probe (surface type,
+    contact) or cancelled as a known signal. First test: short buzz patterns on a hard table, log twist / push / sonar:
+    does it move or spin, which way, how consistently.
 
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
