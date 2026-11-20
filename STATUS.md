@@ -1170,3 +1170,11 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
 - TO TEST LATER (user asked): controlled motion/precision test. Phone on a firm surface; slide known distances against
   a ruler (5 mm, 10 mm, 25 mm) with pauses, then a visible wobble of the phone itself; Record only (or Inaudible chord)
   so raw audio + motion sensors are saved. Compare sonar wall-echo movement, accelerometer and the known distances.
+- Fan fingerprint (2026-11-19): fan recording 56.3 Hz + exact overtones 112.6 / 168.9 Hz. Every half-wall-room recording
+  (a couple of rooms away) has a 56.0-56.9 Hz line, +9..+24 dB over its background, ~34 dB below the near-fan level,
+  overtone at exactly 2x in several sessions. Likely the fan; unproven (no fan-off recording).
+- TO TEST LATER (user plan): fan trail. Record only (keeps 2 min: split into several recordings if longer): ~15 s
+  pointing at the fan close up (learn), slow turn there, then step away in stages (pause ~10 s still at each spot,
+  further each time, into the next rooms), and finish with ~15 s with the fan switched off as the control. Note the
+  spots roughly. Analysis: fingerprint level vs distance, whether turning changes the low-pitch mic timing, and whether
+  the line vanishes with the fan off.
