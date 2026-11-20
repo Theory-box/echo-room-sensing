@@ -1562,7 +1562,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 main menu + guided scan';
+const APP_BUILD = '2026-11-19 guided: pause after ring check';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2560,13 +2560,16 @@ function gdStart() {
   if (running) stopByUser();
   GD = { stage: 'intro', cov: [0, 0], marks: [], li: 0, h: 0, loud: null };
   gdApplySettings(); $('gradar').appendChild($('radarcol')); showScreen('guide');
-  gdSet('intro', 1, 'Get ready', 'Stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while you hold still and stay quiet.',
+  gdSet('intro', 1, 'Get ready', 'Stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while the phone stays still and you stay quiet. You can hold it or set it down anywhere in the room, bottom edge clear.',
     ['Start ring check', () => gdRing()], ['Skip ring check', () => gdSweep(1)]);
 }
 async function gdRing() {
   gdSet('ring', 1, 'Ring check', 'Hold still and stay quiet while the clicks play.', null, null);
   await ringCheck();
-  if (GD && GD.stage === 'ring') gdSweep(1);
+  if (!GD || GD.stage !== 'ring') return;
+  // pause here: the ring check can be done anywhere (e.g. phone lying still), then you go to your scanning spot
+  gdSet('ready', 1, 'Ring check done', (RING ? `The room rings for about ${RING.rt.toFixed(2)} s (${RING.word}). ` : 'No clear ring time this time. ') +
+    'Go to the spot you will scan from, hold the phone at head height, bottom edge out, then press Start sweep.', ['Start sweep', () => gdSweep(1)], ['Redo ring check', () => gdRing()]);
 }
 async function gdSweep(k) {
   if (!GD) return;
