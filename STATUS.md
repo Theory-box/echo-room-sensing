@@ -1156,3 +1156,9 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     reading's processing skipped).
   - End changed (user): when the room is built the sonar stops (sound off, log saved), the map stays drawn, one Main menu
     button. "Start sweep" renamed "Continue to sweep". Build "2026-11-19 guided: still map at the end".
+- CORRECTION (2026-11-19, user: the table wobble was centimetres): the "20-60 um" table-wobble figure came from echoes at
+  0.51 / 0.63 m that move with the table (things on or near it). Re-check over 10 echoes: near ones (0.25-0.82 m)
+  barely change between wobble and still (0.06-0.19 mm vs 0.01-0.16 mm, max-min per 0.5 s); wall echoes at 1.87-2.08 m
+  move ~1.0-1.3 mm during the wobble vs ~0.1 mm still. So: the phone moved ~1 mm along the facing direction relative to
+  the room (the cm the user saw were likely sideways / vertical, or at the table edge); the still noise floor for wall
+  echoes is ~0.1 mm, not micrometres. The 1.9 Hz rhythm match with the accelerometer stands.
