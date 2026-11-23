@@ -64,7 +64,7 @@
     <div class="row" style="margin:4px 0"><button class="alt" id="gcancel" style="flex:0 0 auto;padding:10px 18px">Cancel</button><div id="gstage" class="mut" style="align-self:center"></div></div>
     <div id="gtitle"></div>
     <div id="garrow"></div>
-    <div id="groomrow" style="display:none"><label for="groom" style="margin:6px 0 4px">Which room is this?</label><input type="text" id="groom" list="groomlist" placeholder="e.g. Bedroom, Kitchen, Loft" autocomplete="off"><datalist id="groomlist"></datalist><div id="groomerr" class="err"></div></div>
+    <div id="groomrow" style="display:none"><label for="groom" style="margin:6px 0 4px">Which room is this?</label><input type="text" id="groom" list="groomlist" placeholder="e.g. Bedroom, Kitchen, Loft" autocomplete="off"><datalist id="groomlist"></datalist><div id="groomchips" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0"></div><div id="groomerr" class="err"></div></div>
     <div id="gtext"></div>
     <div id="gprog"></div>
     <div class="row"><button id="gbtn"></button><button class="alt" id="gbtn2"></button></div>
@@ -1594,7 +1594,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-23 rooms: rename, delete, move';
+const APP_BUILD = '2026-11-23 rooms: quick-pick names';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2598,6 +2598,13 @@ function gdStart() {
   const names = [...new Set(scansLoad().map(r => r.room))].sort((a, b) => a.localeCompare(b));
   $('groomlist').innerHTML = names.map(n => `<option value="${escHtml(n)}"></option>`).join('');
   $('groomerr').textContent = ''; $('groom').oninput = () => { $('groomerr').textContent = ''; };
+  // one-tap buttons for rooms scanned before, most recent first (scan the same room again from another spot)
+  const recent = [...new Map(scansLoad().sort((a, b) => (a.t < b.t ? 1 : -1)).map(r => [r.room, r])).keys()].slice(0, 8);
+  const chips = $('groomchips'); chips.innerHTML = '';
+  for (const n of recent) {
+    const b = document.createElement('button'); b.className = 'alt'; b.style.cssText = 'flex:0 0 auto;padding:8px 14px;font-weight:500';
+    b.textContent = n; b.onclick = () => { $('groom').value = n; $('groomerr').textContent = ''; }; chips.appendChild(b);
+  }
   gdSet('intro', 1, 'Get ready', 'Name the room, then stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while the phone stays still and you stay quiet. You can hold it or set it down anywhere in the room, bottom edge clear.',
     ['Start ring check', () => { if (gdNameOk()) gdRing(); }], ['Skip ring check', () => { if (gdNameOk()) gdSweep(1); }]);
 }
