@@ -1202,3 +1202,9 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   The user's Live radar settings are restored on exit. The loud burst on stuck marks only fires when the current sound
   is inaudible, and returns to the chosen sound.
 - Rooms: Rotate left / right on a saved plan in quarter turns (rec.turn, saved), so scans of one room can be lined up (build "2026-11-23 rooms: rotate plans").
+- Room height (build "2026-11-23 room height"): from the Guided sweeps' raw profiles, the all-round echoes (median over
+  12 heading bins): ceiling = nearest strong one 0.9-2.0 m (its double bounce can be as loud), floor = strongest one
+  1.2-2.0 m and >= 0.25 m beyond the ceiling (head-height hold); room height = ceiling + floor (independent of the hold
+  height). Half-wall room, 4 plain head-height scans: 2.79 / 2.85 / 2.82 / 2.91 m (box / roll attachment runs worse).
+  Shown on the end screen, the plan caption and Rooms; logged on the fit event and saved with the scan. Not yet for
+  knee-height scans; no barometer.
