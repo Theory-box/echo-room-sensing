@@ -1233,3 +1233,9 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
     (free fit, both sweeps) / 6 and 10 (each sweep) / 17 deg (tight refine). Length: greens gave 1.87 + 1.50 = 3.37 m,
     free fits 3.56-3.76, the other scans 3.71-3.92. Needs ground truth to say which is right: start a scan facing a wall
     squarely (heading 0 = a wall normal), optionally one tape measurement of length and width.
+- Research pass (2026-11-23): published room-shape-from-echoes work (PNAS "Acoustic echoes reveal room shape", single
+  mobile device / drone echo-SLAM, ELF-SLAM on phones) moves the device between positions; wall directions come from how
+  echo distances change with the movement, not from the beam. Our scans are rotation on the spot, so wall direction
+  rests on the phone's wide beam: the likely root of the loose room angle. Checked the app's existing per-echo
+  "direction from phone motion" on wall echoes during sweeps: scatter +-90 deg (sweeps have little translation), so it
+  can't set the angle. Queued a side-step test (REMEMBER.md).
