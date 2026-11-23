@@ -1217,3 +1217,19 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   in any scan (something there, or the half wall?). A free search near each corner finds other steady echoes about as
   strong, so a corner is only recognisable with the box's prediction, not on its own. Possible use: a per-corner
   "confirmed" tick and a second check of the room angle. Untested in the app. Script: analysis/corners.py.
+- End-of-scan refit prototype (offline, 2026-11-23, no app change; scripts analysis/endpass/). Python copy of the app's
+  room fit replayed on the half-wall-room head-height sweeps (Test 1, Test 2, evening, Guided sweep 1 / sweep 2 / both);
+  it reproduces the app (Guided both = the logged fitAll exactly). No tape measurements, so the yardsticks are
+  agreement between sweeps, the compass (same room, so the room angle in compass terms should match across scans) and
+  the front-back bounce (3.67 m in Test 2).
+  - Arm swing: fitting r = D - a*cos(heading - normal) along each wall's echo track gives a = 22-32 cm wherever the
+    turn crossed the wall from both sides (one-sided coverage gives nonsense, 0-90 cm). The app's fixed 25 cm is fine.
+  - Heading drift: gyro heading vs compass within each sweep sd 0.7-1.5 deg. Not the cause of angle errors.
+  - Tight-tolerance angle refine (1.5 cm, +-40 deg, walls held within 15 cm): Guided sweep 1 vs 2 agree within 1.7 deg
+    (6.3 deg app-style), but across scans the compass-frame angle spread is ~12 deg either way. Unproven.
+  - Bounce echoes as referee: too many 3 dB peaks in 2.8-5 m (2.98 m in most left-right views = twice the right wall),
+    so they can confirm a box (Test 2 3.67 vs 3.71) but not choose between candidates.
+  - Main finding: the room ANGLE is poorly pinned. In the Guided scan alone, estimates span -6 (greens, shown) / 1
+    (free fit, both sweeps) / 6 and 10 (each sweep) / 17 deg (tight refine). Length: greens gave 1.87 + 1.50 = 3.37 m,
+    free fits 3.56-3.76, the other scans 3.71-3.92. Needs ground truth to say which is right: start a scan facing a wall
+    squarely (heading 0 = a wall normal), optionally one tape measurement of length and width.
