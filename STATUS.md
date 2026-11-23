@@ -1201,3 +1201,4 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   (localStorage gdSettings1), logged as `guide` stage settings {s1, s2}, saved with the room scan and shown in Rooms.
   The user's Live radar settings are restored on exit. The loud burst on stuck marks only fires when the current sound
   is inaudible, and returns to the chosen sound.
+- Rooms: Rotate left / right on a saved plan in quarter turns (rec.turn, saved), so scans of one room can be lined up (build "2026-11-23 rooms: rotate plans").

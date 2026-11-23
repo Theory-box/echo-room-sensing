@@ -89,6 +89,7 @@
   <datalist id="rnamelist"></datalist>
   <div id="rdetail" style="display:none">
     <canvas id="rplan" width="720" height="720"></canvas>
+    <div class="row" style="margin:8px 0"><button class="alt" id="rrotl">↺ Rotate left</button><button class="alt" id="rrotr">Rotate right ↻</button></div>
     <div id="rinfo" class="rinfo" style="margin:10px 0"></div>
     <div id="rradarwrap"><div class="mut" style="margin:6px 0">Radar at the end of the sweeps</div><img id="rradar" alt="Radar picture at the end of the sweeps"></div>
     <label for="rmove" style="margin:14px 0 4px">Move this scan to another room</label>
@@ -1599,7 +1600,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-23 guided scan settings';
+const APP_BUILD = '2026-11-23 rooms: rotate plans';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2857,6 +2858,14 @@ function gdDrawCoverage() {
 // type (metres and feet), the scan spot with its distance to each wall, and an arrow for the way you faced at the start.
 const M2FT = 1 / 0.3048;
 function fmtLen(m) { const inch = Math.round(m * M2FT * 12), ft = Math.floor(inch / 12); return `${m.toFixed(2)} m · ${ft}′ ${inch - 12 * ft}″`; }
+// A saved scan can be turned in quarter turns (rec.turn 0-3, clockwise) to line it up with other scans of the room:
+// the plan is squared to the room, so scans of one room differ only by quarter turns.
+function planView(rec) {
+  const t = ((rec.turn || 0) % 4 + 4) % 4; if (!t || !rec.D) return rec;
+  const D = rec.D.slice(), v = rec.votes ? rec.votes.slice() : null;
+  const rD = [0, 1, 2, 3].map(w => D[(w - t + 4) % 4]), rv = v ? [0, 1, 2, 3].map(w => v[(w - t + 4) % 4]) : null;
+  return Object.assign({}, rec, { D: rD, votes: rv, rot: (rec.rot || 0) - 90 * t });
+}
 function drawPlan(c, W, rec) {
   c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
   c.fillStyle = '#05080a'; c.fillRect(0, 0, W, W);
@@ -2979,7 +2988,9 @@ function roomsScan(id) {
     if (to === r.room) { $('rmoveerr').textContent = 'It is already in that room.'; return; }
     scansSave(scansLoad().map(q => q.id === id ? Object.assign(q, { room: to }) : q)); logEv('rooms', { moved: id, from: r.room, to }); roomsRoom(to);
   };
-  drawPlan($('rplan').getContext('2d'), $('rplan').width, r);
+  drawPlan($('rplan').getContext('2d'), $('rplan').width, planView(r));
+  const turn = d => { const a = scansLoad(), q = a.find(x => x.id === id); if (!q) return; q.turn = (((q.turn || 0) + d) % 4 + 4) % 4; scansSave(a); r.turn = q.turn; drawPlan($('rplan').getContext('2d'), $('rplan').width, planView(r)); };
+  $('rrotl').onclick = () => turn(-1); $('rrotr').onclick = () => turn(1);
   const marks = (r.marks || []).reduce((o, m) => { o[m[1]] = (o[m[1]] || 0) + 1; return o; }, {});
   $('rinfo').innerHTML = [
     `<b>${escHtml(fmtWhen(r.t))}</b>`,
