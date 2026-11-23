@@ -79,6 +79,9 @@ Ideas to build / explore
     Plan: map each room (Guided scan + ring check, ideally 2 spots), record both sides of each doorway with the door
     open and closed, note steady sound sources per room (AC, fridge, washer), then offline analysis of what joins up.
     The user tells me which session was which room (or says it at the start of a Record only take).
+    Doorways (user, 2026-11-23): just do a Guided scan standing in the doorway, named e.g. "Doorway Kitchen - Loft".
+    That scan sees both rooms (expect a long, odd box); later, lining it up with each room's own scans places the
+    doorway. No doorway detection from close echoes for now.
 
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
