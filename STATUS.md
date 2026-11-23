@@ -1191,3 +1191,7 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   storage is full). Main menu -> Rooms -> room -> scans -> plan + details + radar picture; delete with a second tap.
   Multiple scans of a room replace "Pause to move" for now (no merging yet). The room name is also logged (`guide`
   events room / fit / saved) so the logs can be grouped.
+- Rooms management (build "2026-11-23 rooms: rename, delete, move"): rename a room (renaming onto an existing name merges
+  them), delete a room (two taps, all its scans), move one scan to another room, delete one scan. Only Guided scans
+  finished from 2026-11-23 on appear in Rooms; older logs stay on the phone for offline analysis.
+- Later (user): let the user pick which wall is the top of the plan; the phone's Back button.

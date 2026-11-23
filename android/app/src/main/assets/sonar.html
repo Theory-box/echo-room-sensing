@@ -75,11 +75,21 @@
 <div id="rooms" style="display:none">
   <div class="row" style="margin:0 0 8px"><button class="alt" id="rback" style="flex:0 0 auto;padding:10px 18px">Back</button><div id="rtitle" style="align-self:center;font-size:1.3em;font-weight:700;color:#cfe"></div></div>
   <div id="rlist"></div>
+  <div id="rroomtools" style="display:none;margin-top:18px">
+    <label for="rrename" style="margin:4px 0">Rename this room</label>
+    <div class="row" style="margin:4px 0"><input type="text" id="rrename" list="rnamelist" autocomplete="off"><button class="alt" id="rrenamebtn" style="flex:0 0 auto;padding:10px 16px">Rename</button></div>
+    <div id="rrenameerr" class="err"></div>
+    <div class="row"><button class="alt" id="rdelroom">Delete this room</button></div>
+  </div>
+  <datalist id="rnamelist"></datalist>
   <div id="rdetail" style="display:none">
     <canvas id="rplan" width="720" height="720"></canvas>
     <div id="rinfo" class="rinfo" style="margin:10px 0"></div>
     <div id="rradarwrap"><div class="mut" style="margin:6px 0">Radar at the end of the sweeps</div><img id="rradar" alt="Radar picture at the end of the sweeps"></div>
-    <div class="row" style="margin-top:14px"><button class="alt" id="rdel">Delete this scan</button></div>
+    <label for="rmove" style="margin:14px 0 4px">Move this scan to another room</label>
+    <div class="row" style="margin:4px 0"><input type="text" id="rmove" list="rnamelist" autocomplete="off"><button class="alt" id="rmovebtn" style="flex:0 0 auto;padding:10px 16px">Move</button></div>
+    <div id="rmoveerr" class="err"></div>
+    <div class="row" style="margin-top:8px"><button class="alt" id="rdel">Delete this scan</button></div>
   </div>
 </div>
 <div id="wrap" style="display:none">
@@ -1584,7 +1594,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-23 guided polish + rooms';
+const APP_BUILD = '2026-11-23 rooms: rename, delete, move';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2843,8 +2853,17 @@ function gdSaveScan(f) {
   return rec;
 }
 function fmtWhen(iso) { const d = new Date(iso); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+function roomNames() { return [...new Set(scansLoad().map(r => r.room))].sort((a, b) => a.localeCompare(b)); }
+function cleanName(v) { return String(v || '').trim().replace(/\s+/g, ' ').slice(0, 40); }
+function twoTap(btn, label, action) {   // first tap arms, second tap within 4 s does it
+  let armed = false; btn.textContent = label;
+  btn.onclick = () => {
+    if (!armed) { armed = true; btn.textContent = 'Tap again to confirm'; setTimeout(() => { armed = false; btn.textContent = label; }, 4000); return; }
+    action();
+  };
+}
 function roomsList() {
-  showScreen('rooms'); $('rtitle').textContent = 'Rooms'; $('rback').onclick = () => showScreen('menu');
+  showScreen('rooms'); $('rtitle').textContent = 'Rooms'; $('rback').onclick = () => showScreen('menu'); $('rroomtools').style.display = 'none';
   $('rdetail').style.display = 'none'; const L = $('rlist'); L.style.display = ''; L.innerHTML = '';
   const by = {}; for (const r of scansLoad()) (by[r.room] = by[r.room] || []).push(r);
   const names = Object.keys(by).sort((a, b) => a.localeCompare(b));
@@ -2858,6 +2877,18 @@ function roomsList() {
 }
 function roomsRoom(n) {
   showScreen('rooms'); $('rtitle').textContent = n; $('rback').onclick = () => roomsList();
+  $('rroomtools').style.display = ''; $('rnamelist').innerHTML = roomNames().map(x => `<option value="${escHtml(x)}"></option>`).join('');
+  $('rrename').value = n; $('rrenameerr').textContent = ''; $('rrename').oninput = () => { $('rrenameerr').textContent = ''; };
+  $('rrenamebtn').onclick = () => {
+    const to = cleanName($('rrename').value);
+    if (!to) { $('rrenameerr').textContent = 'Type the new name first.'; return; }
+    if (to === n) { $('rrenameerr').textContent = 'That is already its name.'; return; }
+    const merged = roomNames().includes(to);
+    scansSave(scansLoad().map(r => r.room === n ? Object.assign(r, { room: to }) : r));
+    logEv('rooms', { renamed: n, to, merged }); roomsRoom(to);
+    if (merged) $('rrenameerr').textContent = `Merged into the existing room "${to}".`;
+  };
+  twoTap($('rdelroom'), 'Delete this room', () => { const k = scansLoad().filter(r => r.room === n).length; scansSave(scansLoad().filter(r => r.room !== n)); logEv('rooms', { deletedRoom: n, scans: k }); roomsList(); });
   $('rdetail').style.display = 'none'; const L = $('rlist'); L.style.display = ''; L.innerHTML = '';
   const list = scansLoad().filter(r => r.room === n).sort((a, b) => (a.t < b.t ? 1 : -1));
   list.forEach((r, i) => {
@@ -2870,7 +2901,15 @@ function roomsRoom(n) {
 function roomsScan(id) {
   const r = scansLoad().find(q => q.id === id); if (!r) { roomsList(); return; }
   $('rtitle').textContent = r.room; $('rback').onclick = () => roomsRoom(r.room);
-  $('rlist').style.display = 'none'; $('rdetail').style.display = '';
+  $('rlist').style.display = 'none'; $('rroomtools').style.display = 'none'; $('rdetail').style.display = '';
+  $('rnamelist').innerHTML = roomNames().map(x => `<option value="${escHtml(x)}"></option>`).join('');
+  $('rmove').value = ''; $('rmoveerr').textContent = ''; $('rmove').oninput = () => { $('rmoveerr').textContent = ''; };
+  $('rmovebtn').onclick = () => {
+    const to = cleanName($('rmove').value);
+    if (!to) { $('rmoveerr').textContent = 'Type or pick the room to move it to.'; return; }
+    if (to === r.room) { $('rmoveerr').textContent = 'It is already in that room.'; return; }
+    scansSave(scansLoad().map(q => q.id === id ? Object.assign(q, { room: to }) : q)); logEv('rooms', { moved: id, from: r.room, to }); roomsRoom(to);
+  };
   drawPlan($('rplan').getContext('2d'), $('rplan').width, r);
   const marks = (r.marks || []).reduce((o, m) => { o[m[1]] = (o[m[1]] || 0) + 1; return o; }, {});
   $('rinfo').innerHTML = [
@@ -2883,11 +2922,7 @@ function roomsScan(id) {
     `<span class="mut">Log folder: ${escHtml(r.session || 'unknown')} · app ${escHtml(r.build || '')}</span>`
   ].join('<br>');
   $('rradarwrap').style.display = r.radar ? '' : 'none'; if (r.radar) $('rradar').src = r.radar;
-  const del = $('rdel'); del.textContent = 'Delete this scan'; let armed = false;
-  del.onclick = () => {
-    if (!armed) { armed = true; del.textContent = 'Tap again to delete for good'; setTimeout(() => { armed = false; del.textContent = 'Delete this scan'; }, 4000); return; }
-    scansSave(scansLoad().filter(q => q.id !== id)); logEv('rooms', { deleted: id, room: r.room }); roomsRoom(r.room);
-  };
+  twoTap($('rdel'), 'Delete this scan', () => { scansSave(scansLoad().filter(q => q.id !== id)); logEv('rooms', { deleted: id, room: r.room }); roomsRoom(r.room); });
 }
 
 $('menuLive').onclick = () => { radarHome(); showScreen('wrap'); };
