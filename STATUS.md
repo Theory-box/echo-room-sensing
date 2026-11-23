@@ -1178,3 +1178,16 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   further each time, into the next rooms), and finish with ~15 s with the fan switched off as the control. Note the
   spots roughly. Analysis: fingerprint level vs distance, whether turning changes the low-pitch mic timing, and whether
   the line vanishes with the fan off.
+
+## 2026-11-23: Guided polish + Rooms (build "2026-11-23 guided polish + rooms")
+- Sweeps: 12 purple progress blocks round you (fill per direction faced in that sweep, fixed to the room as the radar
+  turns) and a big turn arrow ("Turn right" sweep 1, "Turn left" sweep 2).
+- Marks pass: only the room box and the marks are drawn (no live map, wall lines, green / amber dots).
+- End: the floor plan (room box squared to the screen, front wall up) with each wall's length in metres and feet, the
+  distance from the scan spot to each wall, the start-direction arrow, the area; weakly heard walls dashed amber.
+- Rooms: the Guided intro asks for the room name (picker of names used before; required). Each finished scan is saved
+  in the app's storage (localStorage key echoRoomScans1): room, time, log folder, fit (rotation, wall distances, votes,
+  clutter), confidence, ring time, marks, green count, and a JPEG of the radar at the end of the sweeps (dropped if
+  storage is full). Main menu -> Rooms -> room -> scans -> plan + details + radar picture; delete with a second tap.
+  Multiple scans of a room replace "Pause to move" for now (no merging yet). The room name is also logged (`guide`
+  events room / fit / saved) so the logs can be grouped.

@@ -37,6 +37,13 @@
   #gtitle { font-size: 1.35em; font-weight: 700; color: #cfe; }
   #gtext { font-size: 1.02em; color: #dfe; }
   #gprog { font-weight: 700; }
+  #garrow { font-size: 2.2em; font-weight: 700; color: #c9a6ff; line-height: 1.1; }
+  input[type=text] { font: inherit; background: #111; color: #cfe; border: 1px solid #355; border-radius: 8px; padding: 10px; width: 100%; box-sizing: border-box; }
+  .err { color: #ff8a80; font-size: .9em; min-height: 1.2em; }
+  #rooms { padding: 16px; max-width: 760px; margin: 0 auto; }
+  #rooms canvas { border-radius: 10px; }
+  #rradar { width: 100%; border-radius: 10px; display: block; }
+  .rinfo { color: #cfe; font-size: .95em; line-height: 1.5; }
   @media (orientation: landscape) {
     #guide { display: flex; gap: 12px; height: 100%; box-sizing: border-box; padding: 6px 10px; }
     #gradar { order: -1; flex: 0 0 auto; height: 100%; }
@@ -50,17 +57,30 @@
   <p class="mut">Sonar with your phone's speaker and microphones.</p>
   <button id="menuLive" class="big">Live radar<span class="sub">The radar as it has been: start, turn, explore, all settings.</span></button>
   <button id="menuGuided" class="big">Guided room scan<span class="sub">Ring check, two sweeps, then a short to-do list of spots to check. The room is built at the end.</span></button>
+  <button id="menuRooms" class="big alt">Rooms<span class="sub">Saved scans by room: floor plans, sizes and radar pictures.</span></button>
 </div>
 <div id="guide" style="display:none">
   <div id="ghead">
     <div class="row" style="margin:4px 0"><button class="alt" id="gcancel" style="flex:0 0 auto;padding:10px 18px">Cancel</button><div id="gstage" class="mut" style="align-self:center"></div></div>
     <div id="gtitle"></div>
+    <div id="garrow"></div>
+    <div id="groomrow" style="display:none"><label for="groom" style="margin:6px 0 4px">Which room is this?</label><input type="text" id="groom" list="groomlist" placeholder="e.g. Bedroom, Kitchen, Loft" autocomplete="off"><datalist id="groomlist"></datalist><div id="groomerr" class="err"></div></div>
     <div id="gtext"></div>
     <div id="gprog"></div>
     <div class="row"><button id="gbtn"></button><button class="alt" id="gbtn2"></button></div>
     <div id="gstat" class="mut"></div>
   </div>
   <div id="gradar"></div>
+</div>
+<div id="rooms" style="display:none">
+  <div class="row" style="margin:0 0 8px"><button class="alt" id="rback" style="flex:0 0 auto;padding:10px 18px">Back</button><div id="rtitle" style="align-self:center;font-size:1.3em;font-weight:700;color:#cfe"></div></div>
+  <div id="rlist"></div>
+  <div id="rdetail" style="display:none">
+    <canvas id="rplan" width="720" height="720"></canvas>
+    <div id="rinfo" class="rinfo" style="margin:10px 0"></div>
+    <div id="rradarwrap"><div class="mut" style="margin:6px 0">Radar at the end of the sweeps</div><img id="rradar" alt="Radar picture at the end of the sweeps"></div>
+    <div class="row" style="margin-top:14px"><button class="alt" id="rdel">Delete this scan</button></div>
+  </div>
 </div>
 <div id="wrap" style="display:none">
   <div id="topbtns" class="row"><button class="alt" id="back">Menu</button><button id="go">Start sonar</button><button class="alt" id="clear">Clear</button><button class="alt" id="moved" style="display:none">Pause to move</button><button class="alt" id="testbtn">Test</button><button class="alt" id="ringbtn">Ring check</button><button class="alt" id="testend" style="display:none">End test</button></div>
@@ -1546,15 +1566,17 @@ function renderMap(maxR) {
   actx.imageSmoothingEnabled = true;
   actx.globalAlpha = straight ? 0.4 : 1;     // Straighten: the raw map stays visible underneath, dimmed
   const sc0 = RPX / maxR, ox = SLM ? -SLM.x * sc0 : 0, oy = SLM ? SLM.y * sc0 : 0;   // you stay at the centre; the room moves
+  const gdClean = GD && GD.stage === 'marks';   // Guided marks pass: only the room box and the marks are drawn
   actx.save(); actx.translate(ox, oy);
-  actx.drawImage(mapCv, CX - sz, CY - sz, 2 * sz, 2 * sz);
+  if (!gdClean) actx.drawImage(mapCv, CX - sz, CY - sz, 2 * sz, 2 * sz);
   actx.globalAlpha = 1;
-  if (straight) drawWalls(maxR);
+  if (straight && !gdClean) drawWalls(maxR);
   actx.restore();
   if ($('roombox').value === 'on') { actx.save(); actx.translate(ox, oy); drawRoomBox(maxR, ox, oy); actx.restore(); }
-  actx.save(); actx.translate(ox, oy); foDrawGood(sc0); gdDrawMarks(sc0); if (SLM && XW.length) drawPieces(sc0); actx.restore();   // green = good face-on readings collected
-  foDrawLive(sc0);                                                        // amber = focus here (you are near square-on)
+  actx.save(); actx.translate(ox, oy); if (!gdClean) foDrawGood(sc0); gdDrawMarks(sc0); if (SLM && XW.length && !gdClean) drawPieces(sc0); actx.restore();   // green = good face-on readings collected
+  if (!gdClean) foDrawLive(sc0);                                          // amber = focus here (you are near square-on)
   if (MOVE) moveDrawLive(sc0);
+  if (GD) gdDrawCoverage();
 }
 
 // ---------- processing ----------
@@ -1562,7 +1584,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-19 guided: still map at the end';
+const APP_BUILD = '2026-11-23 guided polish + rooms';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2469,7 +2491,7 @@ function saveLog(partial) {
   if (!sonarLog.length && !sonarEvents.length) return;
   let ok = false;
   try {
-    Native.newSession();
+    LAST_SESSION = Native.newSession() || LAST_SESSION;   // folder name, so a saved room scan can point at its log
     // last 20 s (40 s for tone modes) of the mics as a 32-bit float WAV (ch1 bottom, ch2 back, ch3 third mic if
     // "Mics recorded: 3"), for checking the processing offline; the result string ends with the channel count
     let rawInfo = null;
@@ -2477,7 +2499,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rc = room confidence, re-scored at each room-box refit after the lock [percent, walls backed 1/0 x4, walls steady since the lock 1/0 x4, front-back bounce heard, left-right bounce heard (1 yes, 0 no, -1 unknown)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg; guide = Guided room scan step {stage, and per stage: fit1 / fit / fitAll [rotation, wall distances x4, ...], marks [id, heading, distance m, wall or alt, reasons] or a mark result {id, state confirmed / other / ghost / unresolved / skipped, res distance m, faced s, loud}, rotFromGreens, greens, rc}; ring = Ring check result {bands: [low Hz, high Hz, T20 s, T10 s, early decay s, decay range dB, decay length s], rt: ring time s, word}.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rc = room confidence, re-scored at each room-box refit after the lock [percent, walls backed 1/0 x4, walls steady since the lock 1/0 x4, front-back bounce heard, left-right bounce heard (1 yes, 0 no, -1 unknown)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg; guide = Guided room scan step {stage, room (the name typed at the start; also on the fit event), and per stage: fit1 / fit / fitAll [rotation, wall distances x4, ...], marks [id, heading, distance m, wall or alt, reasons] or a mark result {id, state confirmed / other / ghost / unresolved / skipped, res distance m, faced s, loud}, rotFromGreens, greens, rc}; ring = Ring check result {bands: [low Hz, high Hz, T20 s, T10 s, early decay s, decay range dB, decay length s], rt: ring time s, word}.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
@@ -2536,13 +2558,15 @@ drawFrame(null, 5);
 // room's angle -> map (turn to look around; walking off stops the radar and leaves a fixed map). Nothing locks before
 // step 5 (the lock during the first turn locked a wrong angle on 2026-11-19). A mark faced for GD_LOUD_AFTER s without
 // an answer gets a short burst of the faintly audible High chirps, then back to Inaudible. Logged as `guide` events.
-var GD = null, GD_NOLOCK = false;   // var: read by the radar drawing before this line runs
+var GD = null, GD_NOLOCK = false, LAST_SESSION = '';   // var: read by the radar drawing before this line runs
 const GD_GREEN_W = 25, GD_MARK_DIR = 15, GD_MARK_TOL = 0.15, GD_MARK_TIMEOUT = 25, GD_MAX_MARKS = 8,
   GD_LOUD_AFTER = 12, GD_LOUD_SECS = 6, GD_LOUD_PING = 'mid';
-function showScreen(id) { for (const s of ['menu', 'wrap', 'guide']) $(s).style.display = s === id ? '' : 'none'; }
+function showScreen(id) { for (const s of ['menu', 'wrap', 'guide', 'rooms']) $(s).style.display = s === id ? '' : 'none'; }
 function radarHome() { const rc = $('radarcol'); if (rc.parentNode !== $('wrap')) $('wrap').insertBefore(rc, $('sidecol')); }
 function gdSet(stage, step, title, text, b1, b2) {
-  GD.stage = stage; $('gstage').textContent = `Step ${step} of 5`; $('gtitle').textContent = title; $('gtext').textContent = text; $('gprog').textContent = '';
+  GD.stage = stage; $('gstage').textContent = `Step ${step} of 5` + (GD.room ? ` \u00b7 ${GD.room}` : ''); $('gtitle').textContent = title; $('gtext').textContent = text; $('gprog').textContent = '';
+  $('garrow').textContent = stage === 'sweep1' ? '\u21bb  Turn right' : stage === 'sweep2' ? '\u21ba  Turn left' : '';
+  $('groomrow').style.display = stage === 'intro' ? '' : 'none';
   for (const [id, b] of [['gbtn', b1], ['gbtn2', b2]]) { const el = $(id); if (b) { el.textContent = b[0]; el.onclick = b[1]; el.style.display = ''; } else el.style.display = 'none'; }
   logEv('guide', { stage });
 }
@@ -2558,10 +2582,19 @@ function gdRestore() {
 function gdStart() {
   if (TEST || MOVE) return;
   if (running) stopByUser();
-  GD = { stage: 'intro', cov: [0, 0], marks: [], li: 0, h: 0, loud: null };
+  GD = { stage: 'intro', cov: [0, 0], marks: [], li: 0, h: 0, loud: null, room: '' };
+  RING = null; showRoomConf();   // a ring time belongs to the room it was measured in
   gdApplySettings(); $('gradar').appendChild($('radarcol')); showScreen('guide');
-  gdSet('intro', 1, 'Get ready', 'Stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while the phone stays still and you stay quiet. You can hold it or set it down anywhere in the room, bottom edge clear.',
-    ['Start ring check', () => gdRing()], ['Skip ring check', () => gdSweep(1)]);
+  const names = [...new Set(scansLoad().map(r => r.room))].sort((a, b) => a.localeCompare(b));
+  $('groomlist').innerHTML = names.map(n => `<option value="${escHtml(n)}"></option>`).join('');
+  $('groomerr').textContent = ''; $('groom').oninput = () => { $('groomerr').textContent = ''; };
+  gdSet('intro', 1, 'Get ready', 'Name the room, then stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while the phone stays still and you stay quiet. You can hold it or set it down anywhere in the room, bottom edge clear.',
+    ['Start ring check', () => { if (gdNameOk()) gdRing(); }], ['Skip ring check', () => { if (gdNameOk()) gdSweep(1); }]);
+}
+function gdNameOk() {
+  const n = $('groom').value.trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (!n) { $('groomerr').textContent = 'Type a room name first (or pick one you used before).'; $('groom').focus(); return false; }
+  GD.room = n; logEv('guide', { stage: 'room', room: n }); return true;
 }
 async function gdRing() {
   gdSet('ring', 1, 'Ring check', 'Hold still and stay quiet while the clicks play.', null, null);
@@ -2592,6 +2625,7 @@ function gdAltCandidate(n, Dw) {
   return best >= Math.max(10, 0.5 * main) ? { D: RB_MIN + bi * 0.01, n: best } : null;
 }
 function gdMakeMarks() {
+  try { GD.radarJpg = $('ppi').toDataURL('image/jpeg', 0.6); } catch (e) { GD.radarJpg = null; }   // radar picture for Rooms
   if (RBOX.h.length < 100) { gdSet('sweep1', 2, 'Not enough echoes', 'Too few echoes were heard. Turn round once more, a little slower.', null, null); GD.cov = [0, 0]; return; }
   const f = roomFit(null), cl = Math.max(1, f.clutter), out = [];
   for (let w = 0; w < 4; w++) {
@@ -2668,12 +2702,15 @@ function gdFit() {
   if (RBOX.h.length < 50) { gdSet('map', 5, 'Could not build the room', 'Too few echoes. Try a new scan, turning a little slower.', ['New scan', () => { gdExit(); gdStart(); }], ['Menu', () => gdExit()]); return; }
   const f = roomFit(rotG); RBOX.fit = f; RBOX.last = performance.now();
   GD_NOLOCK = false; slLock(f); rcLock(f.rot, f.D); rcScore(f.D, f.votes, f.clutter); showRoomConf();
-  logEv('guide', { stage: 'fit', greens: G.length, rotFromGreens: rotG, greenSpread: spread === null ? null : +spread.toFixed(1), fitAll: GD.fitAll ? [GD.fitAll.rot, ...GD.fitAll.D.map(v => +v.toFixed(2))] : null,
+  logEv('guide', { stage: 'fit', room: GD.room, greens: G.length, rotFromGreens: rotG, greenSpread: spread === null ? null : +spread.toFixed(1), fitAll: GD.fitAll ? [GD.fitAll.rot, ...GD.fitAll.D.map(v => +v.toFixed(2))] : null,
     fit: [f.rot, ...f.D.map(v => +v.toFixed(2)), ...f.votes, f.clutter], rc: RC.row, marks: GD.marks.map(m => [m.id, m.state]) });
-  // finished: stop the sonar (all sound off, log saved) and leave the room drawn as a still map
+  // finished: stop the sonar (all sound off, log saved), show the floor plan, save the scan under its room
   if (running) stopByUser();
-  try { renderMap(+$('range').value); } catch (e) { }
-  gdSet('done', 5, 'Room built', `Room ${RC.pct}% (${RC.txt})` + (RING ? `, rings for ${RING.rt.toFixed(2)} s` : '') + '. The scan is finished and the sound is off.', ['Main menu', () => gdExit()], null);
+  const rec = gdSaveScan(f);
+  $('roomconf').style.display = 'none';
+  drawPlan(ctx, W, rec);
+  gdSet('done', 5, 'Room built', `${GD.room}: confidence ${RC.pct}% (${RC.txt})` + (RING ? `, rings for ${RING.rt.toFixed(2)} s` : '') + '. ' +
+    (rec.saved ? `Saved under Rooms \u2192 ${GD.room}.` : 'Could not save this scan (phone storage full?).') + ' The scan is finished and the sound is off.', ['Main menu', () => gdExit()], null);
   $('gcancel').style.display = 'none';
 }
 function gdFixed() {
@@ -2685,7 +2722,7 @@ function gdExit(cancel) {
   logEv('guide', { stage: cancel ? 'cancel' : 'exit', from: GD.stage });
   if (GD.loud) gdLoud(false);
   if (running) stopByUser(); else saveLog();
-  GD_NOLOCK = false; gdRestore(); GD = null; radarHome(); $('gcancel').style.display = ''; showScreen('menu');
+  GD_NOLOCK = false; gdRestore(); GD = null; radarHome(); $('gcancel').style.display = ''; showRoomConf(); drawFrame(null, +$('range').value); showScreen('menu');
 }
 function gdTick() {
   if (!GD) return;
@@ -2721,8 +2758,141 @@ function gdDrawMarks(sc) {
     actx.fillStyle = '#ffb060'; actx.font = 'bold 20px sans-serif'; actx.textAlign = 'center'; actx.fillText(String(m.id), x, y - (big ? 19 : 15));
   }
 }
+// ---------- Guided sweep progress (2026-11-23, the user's request) ----------
+// 12 purple blocks round you: a block fills once you have faced that direction in this sweep. Drawn in the room's frame,
+// so the filled blocks stay put relative to the room as the radar turns with you.
+function gdDrawCoverage() {
+  if (!GD || (GD.stage !== 'sweep1' && GD.stage !== 'sweep2')) return;
+  const cov = GD.cov[GD.stage === 'sweep1' ? 0 : 1], R0 = Math.round(RPX * 0.2);
+  actx.save();
+  for (let k = 0; k < 12; k++) {
+    const a0 = (k * 30 - 90) * Math.PI / 180, a1 = ((k + 1) * 30 - 90) * Math.PI / 180;
+    actx.beginPath(); actx.arc(CX, CY, R0, a0 + 0.05, a1 - 0.05);
+    actx.lineWidth = 14; actx.strokeStyle = (cov >> k) & 1 ? 'rgba(170,110,255,0.95)' : 'rgba(110,110,130,0.45)'; actx.stroke();
+  }
+  actx.restore();
+}
+
+// ---------- Floor plan (2026-11-23) ----------
+// The room box drawn square to the screen, front wall (the first wall of the fit) at the top, each wall's length in big
+// type (metres and feet), the scan spot with its distance to each wall, and an arrow for the way you faced at the start.
+const M2FT = 1 / 0.3048;
+function fmtLen(m) { const inch = Math.round(m * M2FT * 12), ft = Math.floor(inch / 12); return `${m.toFixed(2)} m · ${ft}′ ${inch - 12 * ft}″`; }
+function drawPlan(c, W, rec) {
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+  c.fillStyle = '#05080a'; c.fillRect(0, 0, W, W);
+  if (!rec || !rec.D) { c.fillStyle = '#cfe'; c.font = '28px system-ui'; c.textAlign = 'center'; c.fillText('No floor plan', W / 2, W / 2); c.restore(); return; }
+  const D = rec.D, width = D[1] + D[3], depth = D[0] + D[2], m = 120, s = (W - 2 * m) / Math.max(width, depth);
+  const ox = W / 2 - s * (D[1] - D[3]) / 2, oy = W / 2 + s * (D[0] - D[2]) / 2;   // screen position of the scan spot
+  const X = x => ox + s * x, Y = y => oy - s * y;
+  const strong = w => !rec.votes || rec.votes[w] >= Math.max(15, 3 * Math.max(1, rec.clutter || 1));
+  const corner = [[-D[3], D[0]], [D[1], D[0]], [D[1], -D[2]], [-D[3], -D[2]]];   // top-left, top-right, bottom-right, bottom-left
+  const sideOf = [[0, 1], [1, 2], [2, 3], [3, 0]];   // wall 0 = top (front), 1 = right, 2 = bottom (back), 3 = left
+  c.fillStyle = 'rgba(40,90,70,0.25)'; c.fillRect(X(-D[3]), Y(D[0]), s * width, s * depth);
+  for (let w = 0; w < 4; w++) {
+    const [a, b] = sideOf[w], p = corner[a], q = corner[b];
+    c.beginPath(); c.moveTo(X(p[0]), Y(p[1])); c.lineTo(X(q[0]), Y(q[1]));
+    c.setLineDash(strong(w) ? [] : [14, 10]); c.lineWidth = 6; c.strokeStyle = strong(w) ? '#e8f4ee' : '#ffb84d'; c.stroke();
+  }
+  c.setLineDash([]);
+  // wall lengths, big, outside each wall
+  c.fillStyle = '#ffffff'; c.font = 'bold 30px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(fmtLen(width), X((D[1] - D[3]) / 2), Y(D[0]) - 34);
+  c.fillText(fmtLen(width), X((D[1] - D[3]) / 2), Y(-D[2]) + 34);
+  for (const [xw, sgn] of [[-D[3], -1], [D[1], 1]]) {
+    c.save(); c.translate(X(xw) + sgn * 34, Y((D[0] - D[2]) / 2)); c.rotate(sgn * Math.PI / 2); c.fillText(fmtLen(depth), 0, 0); c.restore();
+  }
+  // scan spot: dotted lines to each wall with the distance
+  c.strokeStyle = 'rgba(160,210,190,0.6)'; c.lineWidth = 2; c.setLineDash([6, 8]); c.font = '22px system-ui'; c.fillStyle = 'rgba(200,235,220,0.95)';
+  const ends = [[0, D[0]], [D[1], 0], [0, -D[2]], [-D[3], 0]];
+  for (let w = 0; w < 4; w++) {
+    const [ex, ey] = ends[w]; c.beginPath(); c.moveTo(X(0), Y(0)); c.lineTo(X(ex), Y(ey)); c.stroke();
+    const tx = X(ex / 2) + (w % 2 ? 0 : 46), ty = Y(ey / 2) + (w % 2 ? -18 : 0);
+    c.fillText(`${D[w].toFixed(2)} m`, tx, ty);
+  }
+  c.setLineDash([]);
+  // start direction arrow (heading 0 = the way you faced at the start; the plan is turned so the front wall is up)
+  const a = -(rec.rot || 0) * Math.PI / 180, L = 46;
+  c.strokeStyle = '#ffc850'; c.fillStyle = '#ffc850'; c.lineWidth = 4;
+  c.beginPath(); c.moveTo(X(0), Y(0)); c.lineTo(X(0) + L * Math.sin(a), Y(0) - L * Math.cos(a)); c.stroke();
+  c.beginPath(); c.arc(X(0) + L * Math.sin(a), Y(0) - L * Math.cos(a), 6, 0, 2 * Math.PI); c.fill();
+  c.fillStyle = '#3ddc84'; c.beginPath(); c.arc(X(0), Y(0), 10, 0, 2 * Math.PI); c.fill();
+  // caption
+  c.fillStyle = 'rgba(200,235,220,0.9)'; c.font = '20px system-ui'; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  c.fillText(`${rec.room || ''}  ·  ${(width * depth).toFixed(1)} m²`, 14, W - 16);
+  c.textAlign = 'right'; c.fillText('dashed = weakly heard wall  ·  yellow arrow = start direction', W - 14, 28);
+  c.restore();
+}
+
+// ---------- Rooms (2026-11-23): every finished Guided scan saved under its room name ----------
+// Kept in the app's own storage on the phone (localStorage), with the log folder name so the full log can be found when
+// the phone is plugged in. The radar picture is dropped if storage runs out, the plan numbers are always kept.
+const SCANS_KEY = 'echoRoomScans1';
+function escHtml(t) { return String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
+function scansLoad() { try { const a = JSON.parse(localStorage.getItem(SCANS_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function scansSave(a) { try { localStorage.setItem(SCANS_KEY, JSON.stringify(a)); return true; } catch (e) { return false; } }
+function gdSaveScan(f) {
+  const rec = { id: Date.now(), room: GD.room || 'Unnamed', t: new Date().toISOString(), session: LAST_SESSION || null, build: APP_BUILD,
+    rot: f.rot, D: f.D.map(v => +v.toFixed(3)), votes: f.votes.slice(), clutter: f.clutter, pct: RC.pct, rcTxt: RC.txt,
+    ring: RING ? { rt: +RING.rt.toFixed(3), word: RING.word } : null, greens: FO.good.length, marks: GD.marks.map(m => [m.id, m.state]), radar: GD.radarJpg || null };
+  const a = scansLoad(); a.push(rec);
+  let ok = scansSave(a);
+  if (!ok) { rec.radar = null; ok = scansSave(a); rec.noPicture = true; }
+  rec.saved = ok;
+  logEv('guide', { stage: 'saved', room: rec.room, scan: rec.id, session: rec.session, saved: ok, picture: !!rec.radar });
+  return rec;
+}
+function fmtWhen(iso) { const d = new Date(iso); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+function roomsList() {
+  showScreen('rooms'); $('rtitle').textContent = 'Rooms'; $('rback').onclick = () => showScreen('menu');
+  $('rdetail').style.display = 'none'; const L = $('rlist'); L.style.display = ''; L.innerHTML = '';
+  const by = {}; for (const r of scansLoad()) (by[r.room] = by[r.room] || []).push(r);
+  const names = Object.keys(by).sort((a, b) => a.localeCompare(b));
+  if (!names.length) { L.innerHTML = '<p class="mut">No saved scans yet. Finish a Guided room scan and it appears here under the room name you gave it.</p>'; return; }
+  for (const n of names) {
+    const list = by[n], last = list.reduce((a, b) => (a.t > b.t ? a : b));
+    const b = document.createElement('button'); b.className = 'big alt';
+    b.innerHTML = `${escHtml(n)}<span class="sub">${list.length} scan${list.length > 1 ? 's' : ''} · last ${escHtml(fmtWhen(last.t))}</span>`;
+    b.onclick = () => roomsRoom(n); L.appendChild(b);
+  }
+}
+function roomsRoom(n) {
+  showScreen('rooms'); $('rtitle').textContent = n; $('rback').onclick = () => roomsList();
+  $('rdetail').style.display = 'none'; const L = $('rlist'); L.style.display = ''; L.innerHTML = '';
+  const list = scansLoad().filter(r => r.room === n).sort((a, b) => (a.t < b.t ? 1 : -1));
+  list.forEach((r, i) => {
+    const b = document.createElement('button'); b.className = 'big alt';
+    b.innerHTML = `Scan ${list.length - i} · ${escHtml(fmtWhen(r.t))}<span class="sub">${(r.D[1] + r.D[3]).toFixed(2)} × ${(r.D[0] + r.D[2]).toFixed(2)} m · confidence ${r.pct}%${r.ring ? ` · rings ${r.ring.rt.toFixed(2)} s` : ''}</span>`;
+    b.onclick = () => roomsScan(r.id); L.appendChild(b);
+  });
+  if (!list.length) roomsList();
+}
+function roomsScan(id) {
+  const r = scansLoad().find(q => q.id === id); if (!r) { roomsList(); return; }
+  $('rtitle').textContent = r.room; $('rback').onclick = () => roomsRoom(r.room);
+  $('rlist').style.display = 'none'; $('rdetail').style.display = '';
+  drawPlan($('rplan').getContext('2d'), $('rplan').width, r);
+  const marks = (r.marks || []).reduce((o, m) => { o[m[1]] = (o[m[1]] || 0) + 1; return o; }, {});
+  $('rinfo').innerHTML = [
+    `<b>${escHtml(fmtWhen(r.t))}</b>`,
+    `Room ${(r.D[1] + r.D[3]).toFixed(2)} × ${(r.D[0] + r.D[2]).toFixed(2)} m (${fmtLen(r.D[1] + r.D[3]).split(' · ')[1]} × ${fmtLen(r.D[0] + r.D[2]).split(' · ')[1]})`,
+    `From the scan spot: front ${r.D[0].toFixed(2)} m, right ${r.D[1].toFixed(2)} m, back ${r.D[2].toFixed(2)} m, left ${r.D[3].toFixed(2)} m`,
+    `Confidence ${r.pct}% (${escHtml(r.rcTxt || '')})`,
+    r.ring ? `Rings for ${r.ring.rt.toFixed(2)} s (${escHtml(r.ring.word)})` : 'No ring check',
+    `Green readings ${r.greens} · marks: ${Object.entries(marks).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}`,
+    `<span class="mut">Log folder: ${escHtml(r.session || 'unknown')} · app ${escHtml(r.build || '')}</span>`
+  ].join('<br>');
+  $('rradarwrap').style.display = r.radar ? '' : 'none'; if (r.radar) $('rradar').src = r.radar;
+  const del = $('rdel'); del.textContent = 'Delete this scan'; let armed = false;
+  del.onclick = () => {
+    if (!armed) { armed = true; del.textContent = 'Tap again to delete for good'; setTimeout(() => { armed = false; del.textContent = 'Delete this scan'; }, 4000); return; }
+    scansSave(scansLoad().filter(q => q.id !== id)); logEv('rooms', { deleted: id, room: r.room }); roomsRoom(r.room);
+  };
+}
+
 $('menuLive').onclick = () => { radarHome(); showScreen('wrap'); };
 $('menuGuided').onclick = () => gdStart();
+$('menuRooms').onclick = () => roomsList();
 $('gcancel').onclick = () => gdExit(true);
 
 // Buttons: above the radar in portrait, top of the right column in landscape.
