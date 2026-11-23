@@ -1208,3 +1208,12 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   height). Half-wall room, 4 plain head-height scans: 2.79 / 2.85 / 2.82 / 2.91 m (box / roll attachment runs worse).
   Shown on the end screen, the plan caption and Rooms; logged on the fit event and saved with the scan. Not yet for
   knee-height scans; no barometer.
+- Corners as retroreflectors (offline check, 2026-11-23, no app change): 3 half-wall-room scans (Test 2, the evening
+  sweep, the first Guided scan), each box's 4 corners predicted at hypot(Da, Db) in direction rot + atan2(Db, Da).
+  Per 5-degree heading bin, echo level with the all-round echoes removed (median over headings). Clear corner echoes
+  (steady distance within 0.05 m over about 80 degrees of turn, centred on the predicted direction within about 3
+  degrees): Guided front-right (+10 dB vs 0 dB at other headings), Guided back-left (+5.5 vs +2.3), evening back-left
+  (+6.7 vs +2.5), Test 2 front-left (+7.2 vs +0.4). Weak or absent in the other 8; the right-back corner never shows
+  in any scan (something there, or the half wall?). A free search near each corner finds other steady echoes about as
+  strong, so a corner is only recognisable with the box's prediction, not on its own. Possible use: a per-corner
+  "confirmed" tick and a second check of the room angle. Untested in the app. Script: analysis/corners.py.
