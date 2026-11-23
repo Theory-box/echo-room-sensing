@@ -65,6 +65,11 @@
     <div id="gtitle"></div>
     <div id="garrow"></div>
     <div id="groomrow" style="display:none"><label for="groom" style="margin:6px 0 4px">Which room is this?</label><input type="text" id="groom" list="groomlist" placeholder="e.g. Bedroom, Kitchen, Loft" autocomplete="off"><datalist id="groomlist"></datalist><div id="groomchips" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0"></div><div id="groomerr" class="err"></div></div>
+    <details id="gsetbox" style="display:none;margin:4px 0 8px"><summary style="cursor:pointer;color:#cfe;font-weight:600;padding:6px 0">Scan settings</summary>
+      <div id="gset1"></div>
+      <label style="margin:12px 0 4px"><input type="checkbox" id="gdiff"> Different settings for sweep 2</label>
+      <div id="gset2" style="display:none"></div>
+    </details>
     <div id="gtext"></div>
     <div id="gprog"></div>
     <div class="row"><button id="gbtn"></button><button class="alt" id="gbtn2"></button></div>
@@ -1594,7 +1599,7 @@ let lastThr = -38;
 let running = false, yaw0 = null, nearHist = [], sonarLog = [], loopGen = 0, lastFrames = -1, staleSince = 0;
 // ---------- detailed log: events (start/stop/clear/setting changes/pauses/errors) + per-click frames ----------
 // seg increases at every Start and every Clear, so analysis never mixes data across a clear / room change.
-const APP_BUILD = '2026-11-23 rooms: quick-pick names';
+const APP_BUILD = '2026-11-23 guided scan settings';
 let sonarEvents = [], seg = 0, logPart = 0, lastErr = '';
 const curSettings = () => ({ ping: $('ping').value, rate: $('rate').value, range: $('range').value, view: $('dirf').value,
   sens: $('sens').value, mask: $('mask').value, vol: $('vol').value, walls: $('walls').value, bands: $('bands').value, roombox: $('roombox').value });
@@ -2509,7 +2514,7 @@ function saveLog(partial) {
     const res = Native.saveSessionText('sonar_log.json', JSON.stringify({ version: 'sonar-log v2', build: APP_BUILD, time: new Date().toISOString(),
       part: logPart, partial: !!partial,
       settings: Object.assign({ eq: EQW && EQW.map(v => +v.toFixed(2)), dirFilter: $('dirf').value }, curSettings()),
-      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rc = room confidence, re-scored at each room-box refit after the lock [percent, walls backed 1/0 x4, walls steady since the lock 1/0 x4, front-back bounce heard, left-right bounce heard (1 yes, 0 no, -1 unknown)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg; guide = Guided room scan step {stage, room (the name typed at the start; also on the fit event), and per stage: fit1 / fit / fitAll [rotation, wall distances x4, ...], marks [id, heading, distance m, wall or alt, reasons] or a mark result {id, state confirmed / other / ghost / unresolved / skipped, res distance m, faced s, loud}, rotFromGreens, greens, rc}; ring = Ring check result {bands: [low Hz, high Hz, T20 s, T10 s, early decay s, decay range dB, decay length s], rt: ring time s, word}.',
+      format: 'frames: t = ms (page clock), seg = segment (new at every Start/Clear), bg = near-zone static removal active (1) or still learning (0), h = heading deg re start of segment at click time, yaw = raw yaw deg, dl = direct-sound mic lag, avg = extra clicks folded, pk = direct-sound level dB (arbitrary ref, for drift), nz = noise dB re direct, thr = echo threshold dB, gy = max gyro rad/s, tilt = [pitch, roll] deg from gravity, ms = processing time; e = [distance m, level dB, mic lag samples (+ = ahead), class a/s/b/?, back-mic echo dB over its noise, mic shape match -1..1, approach speed cm/s (+ = closer), its consistency 0..1 (phase-based >= 0.5; envelope fallback <= 0.5), source p = phase, t = phase with turn picked from the echo track, e = envelope fallback, x = lost, track id, confirmed 1/0, track speed cm/s, motion correction cm already added to the distance, direction from phone motion [forward part, right part of the direction to it (unit vector; +1/0 = straight ahead, -1/0 = straight behind), z-scores of both (|z| > 2.5 = sure), samples, phone forward/back motion rms cm/s, fit residual cm/s] or null, direction from rough motion v2 [verdict a = ahead / b = behind / ? = unsure, forward part, right part, z-score, readings used, forward movement left after the parabola cm] or null]; pv = phone velocity [forward, right] cm/s at this reading; Quiet tones + pilots only: pm = phone movement from the pilot tones, running total mm (+ = paths to what echoes got longer), pmn = pilot windows processed this reading, pmh = [page ms, total mm] per window; tc = page-clock time (ms, same clock as t) the clicks of this reading were captured (centre); cs = how tc was found: c = recorder capture clock, g = estimate; ac = acceleration samples since the last reading [page-clock ms, east, north m/s^2]; na = acceleration samples received so far; distance = peak refined between samples (build "fine distance" on); fr = recording sample counter at the end of this reading (lines up with raw_audio.wav); nt = confirmed tracks; co = coasting tracks shown [distance, id]; mn = separate clicks used for the speed; p = raw echo profile: level of every 3 cm distance step (step i = i*3..i*3+3 cm) in whole dB re the direct sound, before any threshold or distance compensation, floored at -99; Map only: nw = straight walls found so far, fo = face-on: good slow pass [heading of loudest point, distance m, readings, span deg] or [push, heading, distance m] (green dot); fl = 1 while the amber focus dot shows; pg = push ghost test this reading {ref: distance of the surface in front m, push: how far it moved cm, v: [[echo distance m, its movement per cm the front surface moved, correlation, readings, g = ghost (stays put) / r = real (moves along)]]}; ng = ghosts found so far (kept off the map, room box and tracking); tk = per-turn heading check, log only [heading correction deg, echoes backing it, halves differ deg, accepted 1/0, shift along axis 0 and 1 m (both walls heard, else 0), confidence axis 0, axis 1]; mov = moving: -1 = paused while walking, else new-spot sweep in progress (directions covered of 12); ts = guided test step this reading was taken in (0 = first step of the plan); rbg = room-fit distances dropped as double bounces {wall: distance m}; mv = new spot found [x m, y m, heading correction deg, support, heading trusted 1/0, per axis [offset m, wall A echoes, wall B echoes, alternative offset m, its support, both/one/none], measured walk [m, heading, readings on the line, seconds] or null, share of echoes matching the known room, new wall pieces [direction 0-3, distance m, echoes], furniture check [score here, best nearby, worst nearby, best offset m, rejected 1/0, after a retry 1/0] or null]; hc = total heading correction applied deg; my = magnetic compass heading deg (reference only); slk = room box locked here [rotation, wall distances x4, support x4, clutter]; sl = steady map position [x m, y m (room frame, from where you started; y = heading 0), walking 1/0, up-down bounce rms m/s2, walls matched this click (j = position jumped by recovery), distances found to move with you (kept off the map)]; rc = room confidence, re-scored at each room-box refit after the lock [percent, walls backed 1/0 x4, walls steady since the lock 1/0 x4, front-back bounce heard, left-right bounce heard (1 yes, 0 no, -1 unknown)]; rb = room box fit [rotation deg, wall distances m x4 (normals at rotation + 0/90/180/270 deg), supporting echoes x4, clutter level, echoes used]; rbr = distances (m) left out of the room box as rings (heard in nearly every direction); rcd = regions of constant depth that ended this reading [region id, distance m, middle heading deg, span deg, detections, became a wall 1/0, why e = ended (turned 15 deg or 3 s without it) / w = too wide (floor)]. events: start/restart/stop/clear/setting/pause/stall/error/eq with t, wall clock, seg; guide = Guided room scan step {stage, settings {s1, s2: ping, rate, range, sens, bands, mask, vol per sweep}, room (the name typed at the start; also on the fit event), and per stage: fit1 / fit / fitAll [rotation, wall distances x4, ...], marks [id, heading, distance m, wall or alt, reasons] or a mark result {id, state confirmed / other / ghost / unresolved / skipped, res distance m, faced s, loud}, rotFromGreens, greens, rc}; ring = Ring check result {bands: [low Hz, high Hz, T20 s, T10 s, early decay s, decay range dB, decay length s], rt: ring time s, word}.',
       raw: rawInfo, events: sonarEvents, frames: sonarLog }));
     ok = typeof res !== 'string' || !/fail|error|no session/i.test(res);
   } catch (e) { }
@@ -2576,18 +2581,18 @@ function radarHome() { const rc = $('radarcol'); if (rc.parentNode !== $('wrap')
 function gdSet(stage, step, title, text, b1, b2) {
   GD.stage = stage; $('gstage').textContent = `Step ${step} of 5` + (GD.room ? ` \u00b7 ${GD.room}` : ''); $('gtitle').textContent = title; $('gtext').textContent = text; $('gprog').textContent = '';
   $('garrow').textContent = stage === 'sweep1' ? '\u21bb  Turn right' : stage === 'sweep2' ? '\u21ba  Turn left' : '';
-  $('groomrow').style.display = stage === 'intro' ? '' : 'none';
+  $('groomrow').style.display = stage === 'intro' ? '' : 'none'; $('gsetbox').style.display = stage === 'intro' ? '' : 'none';
   for (const [id, b] of [['gbtn', b1], ['gbtn2', b2]]) { const el = $(id); if (b) { el.textContent = b[0]; el.onclick = b[1]; el.style.display = ''; } else el.style.display = 'none'; }
   logEv('guide', { stage });
 }
 function gdApplySettings() {
-  GD.saved = {}; for (const k of ['ping', 'rate', 'dirf', 'roombox', 'sens', 'walls']) GD.saved[k] = $(k).value;
+  GD.saved = {}; for (const k of ['ping', 'rate', 'dirf', 'roombox', 'sens', 'walls', 'range', 'bands', 'mask', 'vol']) GD.saved[k] = $(k).value;
   $('ping').value = 'quietlong'; buildSens(null); buildView('map'); $('dirf').value = 'map'; $('roombox').value = 'on'; showViewHelp();
 }
 function gdRestore() {
   if (!GD || !GD.saved) return;
   for (const [k, v] of Object.entries(GD.saved)) if ($(k)) $(k).value = v;
-  buildSens(GD.saved.sens); buildView(GD.saved.dirf); showViewHelp();
+  buildSens(GD.saved.sens); buildView(GD.saved.dirf); $('volv').textContent = $('vol').value + '%'; showViewHelp();
 }
 function gdStart() {
   if (TEST || MOVE) return;
@@ -2598,6 +2603,9 @@ function gdStart() {
   const names = [...new Set(scansLoad().map(r => r.room))].sort((a, b) => a.localeCompare(b));
   $('groomlist').innerHTML = names.map(n => `<option value="${escHtml(n)}"></option>`).join('');
   $('groomerr').textContent = ''; $('groom').oninput = () => { $('groomerr').textContent = ''; };
+  const gs = gdSettingsLoad() || {}; gdSetUI(1, gs.s1); gdSetUI(2, gs.s2 || gs.s1);
+  $('gdiff').checked = !!gs.diff; $('gset2').style.display = gs.diff ? '' : 'none';
+  $('gdiff').onchange = () => { $('gset2').style.display = $('gdiff').checked ? '' : 'none'; gdSettingsRemember(); };
   // one-tap buttons for rooms scanned before, most recent first (scan the same room again from another spot)
   const recent = [...new Map(scansLoad().sort((a, b) => (a.t < b.t ? 1 : -1)).map(r => [r.room, r])).keys()].slice(0, 8);
   const chips = $('groomchips'); chips.innerHTML = '';
@@ -2607,6 +2615,53 @@ function gdStart() {
   }
   gdSet('intro', 1, 'Get ready', 'Name the room, then stand where you will scan from and keep your feet there until the end. Hold the phone at head height, bottom edge pointing out, away from your body. First a ring check: about 10 s of audible clicks while the phone stays still and you stay quiet. You can hold it or set it down anywhere in the room, bottom edge clear.',
     ['Start ring check', () => { if (gdNameOk()) gdRing(); }], ['Skip ring check', () => { if (gdNameOk()) gdSweep(1); }]);
+}
+// ---------- Guided scan settings (2026-11-23, the user's request): the Live radar's scan settings, per sweep ----------
+// Sweep 1's settings also cover the marks pass unless sweep 2 differs (then sweep 2's do). View / Room box / Walls stay
+// fixed (Guided needs the map), and Record only is not offered (it makes no sound). Remembered between scans; logged
+// as a `guide` settings event and saved with the room scan.
+const GD_SET_KEYS = [['ping', 'Sound'], ['rate', 'Clicks/s'], ['range', 'Range'], ['sens', 'Sensitivity'], ['bands', 'Pitch bands'], ['mask', 'Hide closer than'], ['vol', 'Click volume']];
+const GD_SET_DEFAULT = { ping: 'quietlong', rate: '15', range: '5', sens: 'auto', bands: '2', mask: '0.15', vol: '100' };
+const gdQuiet = p => /^quiet|^wide|^mic3/.test(p);
+function gdSetUI(k, vals) {
+  const box = $('gset' + k);
+  box.innerHTML = `<div class="mut" style="margin:8px 0 2px">${k === 1 ? 'Sweep 1 (and sweep 2 and the marks, unless sweep 2 differs)' : 'Sweep 2 and the marks'}</div>`;
+  for (const [id, label] of GD_SET_KEYS) {
+    const lab = document.createElement('label'); lab.style.margin = '4px 0'; lab.appendChild(document.createTextNode(label + ' '));
+    let el;
+    if (id === 'vol') { el = document.createElement('input'); el.type = 'range'; el.min = 10; el.max = 100; el.style.flex = '1'; }
+    else {
+      el = document.createElement('select');
+      if (id !== 'sens') el.innerHTML = [...$(id).options].filter(o => !(id === 'ping' && o.value === 'record')).map(o => `<option value="${o.value}">${escHtml(o.textContent)}</option>`).join('');
+    }
+    el.id = `gs${k}_${id}`; lab.appendChild(el);
+    if (id === 'vol') { const v = document.createElement('span'); v.id = `gs${k}_volv`; v.style.minWidth = '3em'; lab.appendChild(v); }
+    box.appendChild(lab);
+  }
+  const v = Object.assign({}, GD_SET_DEFAULT, vals || {});
+  for (const [id] of GD_SET_KEYS) { if (id === 'sens') continue; const el = $(`gs${k}_${id}`); el.value = v[id]; if (id !== 'vol' && el.selectedIndex < 0) el.selectedIndex = 0; }
+  const fillSens = keep => {
+    const opts = gdQuiet($(`gs${k}_ping`).value) ? [['auto', 'Auto'], ['-34', 'Low'], ['-38', 'Medium'], ['-42', 'High']] : [['-38', 'Medium'], ['-34', 'Low'], ['-42', 'High'], ['adaptive', 'Adaptive (test)']];
+    const S = $(`gs${k}_sens`); S.innerHTML = opts.map(([a, b]) => `<option value="${a}">${b}</option>`).join(''); S.value = opts.some(o => o[0] === keep) ? keep : opts[0][0];
+  };
+  fillSens(v.sens);
+  const showVol = () => { $(`gs${k}_volv`).textContent = $(`gs${k}_vol`).value + '%'; }; showVol();
+  $(`gs${k}_ping`).onchange = () => { fillSens(null); gdSettingsRemember(); };   // a new sound type: back to its default sensitivity
+  for (const [id] of GD_SET_KEYS) if (id !== 'ping') $(`gs${k}_${id}`).onchange = gdSettingsRemember;
+  $(`gs${k}_vol`).oninput = showVol;
+}
+function gdReadSet(k) { const o = {}; for (const [id] of GD_SET_KEYS) o[id] = $(`gs${k}_${id}`).value; return o; }
+function gdSettingsRemember() { try { localStorage.setItem('gdSettings1', JSON.stringify({ s1: gdReadSet(1), s2: gdReadSet(2), diff: $('gdiff').checked })); } catch (e) { } }
+function gdSettingsLoad() { try { return JSON.parse(localStorage.getItem('gdSettings1') || 'null'); } catch (e) { return null; } }
+function gdApplySweepSettings(S) {
+  $('ping').value = S.ping; buildSens(S.sens);
+  for (const id of ['rate', 'range', 'bands', 'mask', 'vol']) $(id).value = S[id];
+  $('volv').textContent = $('vol').value + '%'; showViewHelp();
+}
+function gdSetLabel(S) {
+  if (!S) return '';
+  const opt = id => { const o = [...$(id).options].find(q => q.value === S[id]); return o ? o.textContent : S[id]; };
+  return `${opt('ping').split(' \u2013 ')[0]}, ${S.rate} clicks/s, range ${S.range} m, sensitivity ${S.sens}, ${S.bands} band${S.bands === '1' ? '' : 's'}, hide < ${S.mask} m, volume ${S.vol}%`;
 }
 function gdNameOk() {
   const n = $('groom').value.trim().replace(/\s+/g, ' ').slice(0, 40);
@@ -2623,8 +2678,15 @@ async function gdRing() {
 }
 async function gdSweep(k) {
   if (!GD) return;
-  if (k === 1) { GD_NOLOCK = true; GD.cov = [0, 0]; GD.fit1 = null; gdSet('sweep1', 2, 'Sweep 1 of 2', 'Turn slowly all the way round to your right. Keep the phone level at head height.', null, null); await start(false); }
-  else gdSet('sweep2', 3, 'Sweep 2 of 2', 'Now turn slowly all the way back round to your left. Keep the phone level.', null, null);
+  if (k === 1) {
+    GD.S1 = gdReadSet(1); GD.S2 = $('gdiff').checked ? gdReadSet(2) : GD.S1; gdSettingsRemember();
+    logEv('guide', { stage: 'settings', s1: GD.S1, s2: GD.S2 });
+    gdApplySweepSettings(GD.S1);
+    GD_NOLOCK = true; GD.cov = [0, 0]; GD.fit1 = null; gdSet('sweep1', 2, 'Sweep 1 of 2', 'Turn slowly all the way round to your right. Keep the phone level at head height.', null, null); await start(false);
+  } else {
+    gdSet('sweep2', 3, 'Sweep 2 of 2', 'Now turn slowly all the way back round to your left. Keep the phone level.', null, null);
+    if (JSON.stringify(GD.S2) !== JSON.stringify(GD.S1)) { gdApplySweepSettings(GD.S2); if (running) { stop(); start(true); } }   // keeps the map
+  }
   if (GD) GD.cov[k - 1] = 0;
 }
 function gdGhostLike(D, w) {
@@ -2668,8 +2730,8 @@ function gdTarget() {
 }
 function gdSkip() { const m = gdTarget(); if (m) { m.state = 'skipped'; logEv('guide', { stage: 'mark', id: m.id, state: 'skipped', faced: +m.faced.toFixed(1) }); } }
 function gdLoud(on) {   // short burst of a louder band while stuck on a mark, then back to the inaudible chirps
-  if (on && !GD.loud) { GD.loud = { t: performance.now() }; $('ping').value = GD_LOUD_PING; buildSens(null); logEv('guide', { stage: 'loud-on', ping: GD_LOUD_PING }); if (running) { stop(); start(true); } }
-  else if (!on && GD.loud) { GD.loud = null; $('ping').value = 'quietlong'; buildSens(null); logEv('guide', { stage: 'loud-off' }); if (running) { stop(); start(true); } }
+  if (on && !GD.loud && /^quiet/.test($('ping').value)) { GD.loud = { t: performance.now() }; $('ping').value = GD_LOUD_PING; buildSens(null); logEv('guide', { stage: 'loud-on', ping: GD_LOUD_PING }); if (running) { stop(); start(true); } }
+  else if (!on && GD.loud) { GD.loud = null; const S = GD.S2 || GD_SET_DEFAULT; $('ping').value = S.ping; buildSens(S.sens); logEv('guide', { stage: 'loud-off' }); if (running) { stop(); start(true); } }
 }
 function gdCheckMarks() {
   const now = performance.now();
@@ -2851,7 +2913,7 @@ function scansSave(a) { try { localStorage.setItem(SCANS_KEY, JSON.stringify(a))
 function gdSaveScan(f) {
   const rec = { id: Date.now(), room: GD.room || 'Unnamed', t: new Date().toISOString(), session: LAST_SESSION || null, build: APP_BUILD,
     rot: f.rot, D: f.D.map(v => +v.toFixed(3)), votes: f.votes.slice(), clutter: f.clutter, pct: RC.pct, rcTxt: RC.txt,
-    ring: RING ? { rt: +RING.rt.toFixed(3), word: RING.word } : null, greens: FO.good.length, marks: GD.marks.map(m => [m.id, m.state]), radar: GD.radarJpg || null };
+    ring: RING ? { rt: +RING.rt.toFixed(3), word: RING.word } : null, settings: { s1: GD.S1 || null, s2: GD.S2 || null }, greens: FO.good.length, marks: GD.marks.map(m => [m.id, m.state]), radar: GD.radarJpg || null };
   const a = scansLoad(); a.push(rec);
   let ok = scansSave(a);
   if (!ok) { rec.radar = null; ok = scansSave(a); rec.noPicture = true; }
@@ -2925,6 +2987,7 @@ function roomsScan(id) {
     `From the scan spot: front ${r.D[0].toFixed(2)} m, right ${r.D[1].toFixed(2)} m, back ${r.D[2].toFixed(2)} m, left ${r.D[3].toFixed(2)} m`,
     `Confidence ${r.pct}% (${escHtml(r.rcTxt || '')})`,
     r.ring ? `Rings for ${r.ring.rt.toFixed(2)} s (${escHtml(r.ring.word)})` : 'No ring check',
+    r.settings && r.settings.s1 ? `Settings: ${escHtml(gdSetLabel(r.settings.s1))}` + (r.settings.s2 && JSON.stringify(r.settings.s2) !== JSON.stringify(r.settings.s1) ? `<br>Sweep 2: ${escHtml(gdSetLabel(r.settings.s2))}` : '') : 'Settings not recorded',
     `Green readings ${r.greens} · marks: ${Object.entries(marks).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}`,
     `<span class="mut">Log folder: ${escHtml(r.session || 'unknown')} · app ${escHtml(r.build || '')}</span>`
   ].join('<br>');

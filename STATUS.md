@@ -1195,3 +1195,9 @@ published fix for the mirror ambiguity moves the device (rotation/slide = synthe
   them), delete a room (two taps, all its scans), move one scan to another room, delete one scan. Only Guided scans
   finished from 2026-11-23 on appear in Rooms; older logs stay on the phone for offline analysis.
 - Later (user): let the user pick which wall is the top of the plan; the phone's Back button.
+- Guided scan settings (build "2026-11-23 guided scan settings"): a "Scan settings" section on the intro with the Live
+  radar's scan controls (sound, clicks/s, range, sensitivity, pitch bands, hide-closer-than, volume; not View / Room box /
+  Walls; no Record only), optional "Different settings for sweep 2" (sweep 2's also used for the marks pass). Remembered
+  (localStorage gdSettings1), logged as `guide` stage settings {s1, s2}, saved with the room scan and shown in Rooms.
+  The user's Live radar settings are restored on exit. The loud burst on stuck marks only fires when the current sound
+  is inaudible, and returns to the chosen sound.
