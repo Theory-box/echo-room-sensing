@@ -3,12 +3,14 @@
 # Test queue (run in a row when there is time)
 
 Ready now (no app changes needed):
-- Side-step test (2026-11-23, from research: room-shape papers move the device; we only rotate). Live radar, Inaudible
-  long, map view. Stand facing a wall squarely (phone level, pointing at it), Start, hold still 5 s, then keep the phone
-  pointing the same way and side-step about half a metre left, hold 5 s, back to the middle, hold 5 s, half a metre
-  right, hold 5 s, back, Stop. Then one plain Guided scan started facing the same wall squarely (known room angle).
-  Offline: every wall's echo moves by the step's part along its normal; the ratio front-wall shift / side-wall shift
-  gives the room angle without knowing the step length.
+- Slide test (2026-11-23, from research: room-shape papers move the device; we only rotate). Live radar, Inaudible
+  long, map view. Face the front wall squarely, phone level and pointing at it, Start. Hold still 3 s; slide the phone
+  left and right with your arm (~30 cm each way, keep it pointing straight ahead, ~1 s per swing) 3 times; hold 3 s;
+  push forward and back 3 times; hold 3 s. Turn to face the right-hand wall squarely and do the same. Stop. Then one
+  plain Guided scan started facing the front wall squarely (known room angle). Offline: each wall's echo moves by the
+  slide's part along its normal; front-wall shift vs side-wall shift (or vs the accelerometer's slide length) gives the
+  room angle; double bounces move twice as much, corners and furniture move differently from flat walls.
+  If it works: a "slide" step in the Guided scan after the sweeps.
 - [ ] **Guided scan check**: one Guided scan in the half-wall room; confirm sound stops at the end, still map + Main
       menu; I check the log for the old unlocked-refit error.
 - [ ] **Which hole is which mic**: Record only, tap gently next to each mic hole in turn (bottom edge, top, back),
