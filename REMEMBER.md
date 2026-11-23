@@ -82,6 +82,9 @@ Ideas to build / explore
     Doorways (user, 2026-11-23): just do a Guided scan standing in the doorway, named e.g. "Doorway Kitchen - Loft".
     That scan sees both rooms (expect a long, odd box); later, lining it up with each room's own scans places the
     doorway. No doorway detection from close echoes for now.
+23. Corner check (parked by the user, 2026-11-23): corners echo back steadily over a wide turn. Offline, 4 of 12
+    predicted corners showed clearly (see STATUS.md). If picked up again: check-only first (tick confirmed corners on
+    the plan, feed the confidence score, box unchanged); maybe later a "point at this corner" guided step.
 
 Separate project (not Echo Room)
 16. Magnetometer stud finder app (phone flat on the wall, slide, meter + beep near screws).
